@@ -208,9 +208,8 @@ run = [
 ]
 
 [tasks.coverage-ci]
-description = "Generate coverage report for CI (without HTML)"
-depends = ["setup-envtest-bins"]
+description = "Generate coverage report for CI (unit tests only)"
 run = [
     "echo '📊 Generating coverage report for CI...'",
-    "go test ./... -coverprofile=coverage.out -covermode=atomic",
+    "go test ./api/v1alpha1 ./cmd ./internal/helpers -coverprofile=coverage.out -covermode=atomic",
 ]

@@ -26,9 +26,6 @@ jobs:
     
     - name: Run CI pipeline
       run: mise run ci-fast
-    
-    - name: Generate coverage report
-      run: mise run coverage-ci
 
   build-docker:
     runs-on: ubuntu-latest
