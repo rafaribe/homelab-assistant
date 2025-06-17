@@ -1,0 +1,72 @@
+apiVersion: homelab.rafaribe.com/v1alpha1
+kind: VolSyncMonitor
+metadata:
+  labels:
+    app.kubernetes.io/name: volsyncmonitor
+    app.kubernetes.io/instance: volsync-monitor-main
+    app.kubernetes.io/part-of: homelab-assistant
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: homelab-assistant
+  name: volsync-monitor-main
+  namespace: homelab-assistant-system
+spec:
+  # Enable the monitor
+  enabled: true
+  
+  # Maximum number of concurrent unlock operations
+  maxConcurrentUnlocks: 3
+  
+  # TTL for unlock jobs (1 hour)
+  ttlSecondsAfterFinished: 3600
+  
+  # Custom patterns to detect lock errors in job logs (optional)
+  # These patterns will be matched against pod status messages and container termination messages
+  lockErrorPatterns:
+    - "repository is already locked"
+    - "unable to create lock"
+    - "repository locked"
+    - "lock.*already.*exists"
+    - "failed to create lock"
+    - "repository.*locked.*by.*another.*process"
+  
+  # Template for unlock jobs
+  unlockJobTemplate:
+    # Use the same restic image that VolSync uses
+    image: "quay.io/backube/volsync:0.13.0-rc.2"
+    
+    # Override command to run restic directly instead of the VolSync wrapper
+    command: ["restic"]
+    args: ["unlock", "--remove-all"]
+    
+    # Resource requirements (similar to VolSync jobs)
+    resources:
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+    
+    # Security context (matching VolSync pattern)
+    securityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+
+---
+# Example of how this works with your prowlarr setup:
+#
+# When this VolSync job fails:
+#   Name: volsync-src-prowlarr-nfs
+#   Namespace: downloads
+#   Secret: prowlarr-volsync-nfs
+#   Volumes: NFS mount at /mnt/storage-0/volsync from truenas.rafaribe.com
+#
+# The controller automatically creates:
+#   Name: volsync-unlock-prowlarr-prowlarr-nfs-<timestamp>
+#   Namespace: downloads
+#   Same environment variables from prowlarr-volsync-nfs secret
+#   Same NFS volume mount discovered from the failed job
+#   Command: restic unlock --remove-all
+#
+# No manual configuration needed - it discovers everything from the failed job!

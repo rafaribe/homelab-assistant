@@ -1,0 +1,47 @@
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/kustomize.toolkit.fluxcd.io/kustomization_v1.json
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app homelab-assistant-crds
+  namespace: flux-system
+spec:
+  path: ./kubernetes/main/apps/utility/homelab-assistant/crds
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: home-ops
+  interval: 30m
+  retryInterval: 1m
+  timeout: 3m
+  targetNamespace: homelab-assistant-system
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: homelab-assistant
+      app.kubernetes.io/component: crds
+
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: &app homelab-assistant
+  namespace: flux-system
+spec:
+  path: ./kubernetes/main/apps/utility/homelab-assistant/app
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: home-ops
+  interval: 30m
+  retryInterval: 1m
+  timeout: 3m
+  targetNamespace: homelab-assistant-system
+  dependsOn:
+    - name: homelab-assistant-crds
+  commonMetadata:
+    labels:
+      app.kubernetes.io/name: *app
+  postBuild:
+    substitute:
+      APP: *app
+      VOLSYNC_CAPACITY: 1Gi

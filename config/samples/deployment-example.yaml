@@ -1,0 +1,119 @@
+# Example deployment for the VolSync Monitor in rafaribe's homelab
+# This monitors VolSync jobs across all namespaces and automatically
+# creates unlock jobs when lock issues are detected
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: homelab-assistant-system
+
+---
+apiVersion: homelab.rafaribe.com/v1alpha1
+kind: VolSyncMonitor
+metadata:
+  name: main-volsync-monitor
+  namespace: homelab-assistant-system
+spec:
+  # Enable monitoring
+  enabled: true
+  
+  # Allow up to 3 concurrent unlock operations across all namespaces
+  maxConcurrentUnlocks: 3
+  
+  # Keep unlock jobs for 1 hour after completion for debugging
+  ttlSecondsAfterFinished: 3600
+  
+  # Enhanced lock error patterns for better detection
+  lockErrorPatterns:
+    - "repository is already locked"
+    - "unable to create lock"
+    - "repository locked"
+    - "lock.*already.*exists"
+    - "failed to create lock"
+    - "repository.*locked.*by.*another.*process"
+    - "timeout.*waiting.*for.*lock"
+    - "could not create lock"
+  
+  # Job template for unlock operations
+  unlockJobTemplate:
+    # Use the same VolSync image for consistency
+    image: "quay.io/backube/volsync:0.13.0-rc.2"
+    
+    # Run restic unlock directly
+    command: ["restic"]
+    args: ["unlock", "--remove-all"]
+    
+    # Resource limits similar to VolSync jobs
+    resources:
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+    
+    # Security context matching VolSync pattern
+    securityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+
+---
+# Example of what the controller will handle automatically:
+#
+# When this VolSync job fails:
+#   Name: volsync-src-prowlarr-nfs
+#   Namespace: downloads
+#   Secret: prowlarr-volsync-nfs
+#   NFS Mount: /mnt/storage-0/volsync (via admission policy)
+#
+# The controller creates this unlock job:
+#   Name: volsync-unlock-prowlarr-prowlarr-nfs-<timestamp>
+#   Namespace: downloads
+#   Same environment variables and volumes as the failed job
+#   Annotations to trigger NFS mounting via admission policies
+#
+# Similar pattern works for:
+# - lidarr-nfs in downloads namespace
+# - sonarr-nfs in downloads namespace  
+# - Any other VolSync-managed applications
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: volsync-monitor-info
+  namespace: homelab-assistant-system
+data:
+  README.md: |
+    # VolSync Monitor Controller
+    
+    This controller automatically monitors VolSync jobs for failures and creates
+    unlock jobs when restic repository lock issues are detected.
+    
+    ## How it works:
+    1. Watches all Kubernetes Jobs for VolSync failures
+    2. Checks failed job pod status for lock-related errors
+    3. Automatically creates unlock jobs with the same configuration
+    4. Uses annotations to trigger NFS mounting via admission policies
+    
+    ## Supported Applications:
+    - prowlarr (downloads namespace)
+    - lidarr (downloads namespace)
+    - sonarr (downloads namespace)
+    - Any application using VolSync with restic backend
+    
+    ## Secret Naming Patterns Detected:
+    - {app}-volsync-nfs (e.g., prowlarr-volsync-nfs)
+    - {app}-restic-secret
+    - {app}-volsync
+    - {objectName}-secret
+    
+    ## Volume Discovery:
+    The controller automatically discovers volume configurations from failed
+    VolSync jobs and replicates them in unlock jobs. This includes:
+    - NFS mounts (via admission policies)
+    - PVC mounts
+    - Direct volume specifications
+    
+    ## Monitoring:
+    Check status with: kubectl get volsyncmonitor -o wide

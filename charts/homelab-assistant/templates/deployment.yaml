@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "homelab-assistant.fullname" . }}-controller
+  namespace: {{ include "homelab-assistant.namespace" . }}
+  labels:
+    {{- include "homelab-assistant.labels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+  {{- with (include "homelab-assistant.annotations" .) }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "homelab-assistant.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: controller
+  template:
+    metadata:
+      labels:
+        {{- include "homelab-assistant.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: controller
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+    spec:
+      serviceAccountName: {{ include "homelab-assistant.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: manager
+        image: {{ include "homelab-assistant.controller.image" . }}
+        imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
+        args:
+        - --leader-elect
+        - --health-probe-bind-address=:8081
+        - --metrics-bind-address=:8080
+        command:
+        - /manager
+        env:
+        - name: METRICS_BIND_ADDRESS
+          value: ":8080"
+        - name: HEALTH_PROBE_BIND_ADDRESS
+          value: ":8081"
+        - name: LEADER_ELECT
+          value: "true"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        ports:
+        - containerPort: 8080
+          name: metrics
+          protocol: TCP
+        - containerPort: 8081
+          name: health
+          protocol: TCP
+        resources:
+          {{- toYaml .Values.controller.resources | nindent 10 }}
+        securityContext:
+          {{- toYaml .Values.controller.securityContext | nindent 10 }}
+      {{- with .Values.controller.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controller.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controller.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: 10

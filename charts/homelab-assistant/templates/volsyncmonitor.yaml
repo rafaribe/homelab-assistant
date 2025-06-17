@@ -1,0 +1,54 @@
+{{- if .Values.volsyncMonitor.enabled }}
+apiVersion: homelab.rafaribe.com/v1alpha1
+kind: VolSyncMonitor
+metadata:
+  name: {{ include "homelab-assistant.fullname" . }}-volsync-monitor
+  namespace: {{ include "homelab-assistant.namespace" . }}
+  labels:
+    {{- include "homelab-assistant.labels" . | nindent 4 }}
+    app.kubernetes.io/component: volsync-monitor
+  {{- with (include "homelab-assistant.annotations" .) }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+spec:
+  enabled: {{ .Values.volsyncMonitor.enabled }}
+  {{- if .Values.volsyncMonitor.maxConcurrentUnlocks }}
+  maxConcurrentUnlocks: {{ .Values.volsyncMonitor.maxConcurrentUnlocks }}
+  {{- end }}
+  {{- if .Values.volsyncMonitor.ttlSecondsAfterFinished }}
+  ttlSecondsAfterFinished: {{ .Values.volsyncMonitor.ttlSecondsAfterFinished }}
+  {{- end }}
+  {{- if .Values.volsyncMonitor.lockErrorPatterns }}
+  lockErrorPatterns:
+    {{- toYaml .Values.volsyncMonitor.lockErrorPatterns | nindent 4 }}
+  {{- end }}
+  unlockJobTemplate:
+    image: {{ include "homelab-assistant.volsyncMonitor.unlockJob.image" . }}
+    {{- if .Values.volsyncMonitor.unlockJob.command }}
+    command:
+      {{- toYaml .Values.volsyncMonitor.unlockJob.command | nindent 6 }}
+    {{- end }}
+    {{- if .Values.volsyncMonitor.unlockJob.args }}
+    args:
+      {{- toYaml .Values.volsyncMonitor.unlockJob.args | nindent 6 }}
+    {{- end }}
+    {{- if .Values.volsyncMonitor.unlockJob.resources }}
+    resources:
+      {{- if .Values.volsyncMonitor.unlockJob.resources.limits }}
+      limits:
+        {{- toYaml .Values.volsyncMonitor.unlockJob.resources.limits | nindent 8 }}
+      {{- end }}
+      {{- if .Values.volsyncMonitor.unlockJob.resources.requests }}
+      requests:
+        {{- toYaml .Values.volsyncMonitor.unlockJob.resources.requests | nindent 8 }}
+      {{- end }}
+    {{- end }}
+    {{- if .Values.volsyncMonitor.unlockJob.securityContext }}
+    securityContext:
+      {{- toYaml .Values.volsyncMonitor.unlockJob.securityContext | nindent 6 }}
+    {{- end }}
+    {{- if .Values.volsyncMonitor.unlockJob.serviceAccount }}
+    serviceAccount: {{ .Values.volsyncMonitor.unlockJob.serviceAccount }}
+    {{- end }}
+{{- end }}

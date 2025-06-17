@@ -1,0 +1,22 @@
+# Default test values for chart testing
+controller:
+  image:
+    repository: ghcr.io/rafaribe/homelab-assistant
+    tag: latest
+    pullPolicy: IfNotPresent
+
+volsyncMonitor:
+  enabled: true
+  maxConcurrentUnlocks: 3
+  ttlSecondsAfterFinished: 3600
+
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: false  # Disable for testing without prometheus-operator
+
+serviceAccount:
+  create: true
+
+rbac:
+  create: true

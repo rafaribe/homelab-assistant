@@ -1,0 +1,173 @@
+# Default values for homelab-assistant
+# This is a YAML-formatted file.
+
+# Global configuration
+global:
+  # Image registry for all components
+  imageRegistry: ghcr.io
+  # Image pull policy
+  imagePullPolicy: IfNotPresent
+
+# Controller configuration
+controller:
+  # Controller image
+  image:
+    repository: ghcr.io/rafaribe/homelab-assistant
+    tag: latest
+    pullPolicy: IfNotPresent
+  
+  # Resource requirements for the controller
+  resources:
+    limits:
+      cpu: 500m
+      memory: 128Mi
+    requests:
+      cpu: 10m
+      memory: 64Mi
+  
+  # Security context for the controller
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+      - ALL
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+  
+  # Node selector for controller pod
+  nodeSelector: {}
+  
+  # Tolerations for controller pod
+  tolerations: []
+  
+  # Affinity for controller pod
+  affinity: {}
+
+# VolSync Monitor Controller configuration
+volsyncMonitor:
+  # Enable the VolSync monitor controller
+  enabled: true
+  
+  # Maximum number of concurrent unlock operations
+  maxConcurrentUnlocks: 3
+  
+  # TTL for unlock jobs (in seconds) - 1 hour default
+  ttlSecondsAfterFinished: 3600
+  
+  # Custom lock error patterns (optional)
+  # If not specified, sensible defaults will be used
+  lockErrorPatterns: []
+    # - "repository is already locked"
+    # - "unable to create lock"
+    # - "repository locked"
+    # - "lock.*already.*exists"
+    # - "failed to create lock"
+    # - "repository.*locked.*by.*another.*process"
+  
+  # Unlock job template configuration
+  unlockJob:
+    # Image to use for unlock jobs
+    image:
+      repository: quay.io/backube/volsync
+      tag: "0.13.0-rc.2"
+      pullPolicy: IfNotPresent
+    
+    # Command and args for unlock jobs
+    command: ["restic"]
+    args: ["unlock", "--remove-all"]
+    
+    # Resource requirements for unlock jobs
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 128Mi
+    
+    # Security context for unlock jobs
+    securityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+    
+    # Service account for unlock jobs (optional)
+    serviceAccount: ""
+
+# Future controllers can be added here
+# Example:
+# backupController:
+#   enabled: false
+# 
+# networkController:
+#   enabled: false
+
+# Service account configuration
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+# RBAC configuration
+rbac:
+  # Specifies whether RBAC resources should be created
+  create: true
+
+# Pod Security Policy
+podSecurityPolicy:
+  # Specifies whether a PodSecurityPolicy should be created
+  create: false
+
+# Namespace configuration
+namespace:
+  # Create namespace if it doesn't exist
+  create: true
+  # Namespace name (defaults to Release.Namespace)
+  name: ""
+
+# Metrics configuration
+metrics:
+  # Enable metrics endpoint
+  enabled: true
+  # Metrics port
+  port: 8080
+  # Service monitor for Prometheus (requires prometheus-operator)
+  serviceMonitor:
+    enabled: false
+    # Additional labels for ServiceMonitor
+    additionalLabels: {}
+    # Scrape interval
+    interval: 30s
+
+# Webhook configuration (for future use)
+webhook:
+  # Enable admission webhook
+  enabled: false
+  # Webhook port
+  port: 9443
+
+# Additional labels to add to all resources
+commonLabels: {}
+
+# Additional annotations to add to all resources
+commonAnnotations: {}
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  # maxUnavailable: 1
+
+# Network policy
+networkPolicy:
+  enabled: false
+  # Ingress rules
+  ingress: []
+  # Egress rules  
+  egress: []

@@ -1,0 +1,321 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.13.0
+  name: volsyncmonitors.homelab.rafaribe.com
+spec:
+  group: homelab.rafaribe.com
+  names:
+    kind: VolSyncMonitor
+    listKind: VolSyncMonitorList
+    plural: volsyncmonitors
+    singular: volsyncmonitor
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.lastCheckTime
+      name: Last Check
+      type: date
+    - jsonPath: .status.activeUnlocks
+      name: Active Unlocks
+      type: integer
+    - jsonPath: .status.totalUnlocksCreated
+      name: Total Created
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: VolSyncMonitor is the Schema for the volsyncmonitors API
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal version, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: VolSyncMonitorSpec defines the desired state of VolSyncMonitor
+            properties:
+              alertQuery:
+                description: AlertQuery is the query to find VolSync out-of-sync alerts
+                type: string
+              alertmanagerUrl:
+                description: AlertmanagerURL is the URL of the Alertmanager instance
+                  to query
+                type: string
+              checkInterval:
+                description: CheckInterval defines how often to check for alerts (in
+                  seconds)
+                format: int32
+                type: integer
+              enabled:
+                description: Enabled controls whether the monitor is active
+                type: boolean
+              maxConcurrentUnlocks:
+                description: MaxConcurrentUnlocks limits the number of concurrent unlock
+                  operations
+                format: int32
+                type: integer
+              ttlSecondsAfterFinished:
+                description: TTLSecondsAfterFinished specifies the TTL for unlock jobs
+                format: int32
+                type: integer
+              unlockJobTemplate:
+                description: UnlockJobTemplate defines the template for unlock jobs
+                properties:
+                  args:
+                    description: Args are the arguments to pass to the command
+                    items:
+                      type: string
+                    type: array
+                  command:
+                    description: Command is the command to run in the unlock job
+                    items:
+                      type: string
+                    type: array
+                  image:
+                    description: Image is the container image to use for unlock jobs
+                    type: string
+                  repositoryMount:
+                    description: RepositoryMount defines how to mount the restic repository
+                    properties:
+                      hostPath:
+                        description: HostPath configuration (when type is "hostPath")
+                        properties:
+                          path:
+                            description: Path on the host
+                            type: string
+                          readOnly:
+                            description: ReadOnly specifies if the mount should be read-only
+                            type: boolean
+                          type:
+                            description: Type of hostPath
+                            type: string
+                        required:
+                        - path
+                        type: object
+                      mountPath:
+                        description: MountPath is where to mount the repository in the
+                          container
+                        type: string
+                      nfs:
+                        description: NFS configuration (when type is "nfs")
+                        properties:
+                          path:
+                            description: Path is the path on the NFS server
+                            type: string
+                          readOnly:
+                            description: ReadOnly specifies if the mount should be read-only
+                            type: boolean
+                          server:
+                            description: Server is the NFS server hostname or IP
+                            type: string
+                        required:
+                        - path
+                        - server
+                        type: object
+                      pvc:
+                        description: PVC configuration (when type is "pvc")
+                        properties:
+                          claimName:
+                            description: ClaimName is the name of the PVC
+                            type: string
+                          readOnly:
+                            description: ReadOnly specifies if the mount should be read-only
+                            type: boolean
+                        required:
+                        - claimName
+                        type: object
+                      type:
+                        description: Type of mount (nfs, pvc, hostPath, etc.)
+                        type: string
+                    required:
+                    - type
+                    type: object
+                  resources:
+                    description: Resources defines resource requirements for unlock
+                      jobs
+                    properties:
+                      limits:
+                        additionalProperties:
+                          type: string
+                        description: Limits describes the maximum amount of compute
+                          resources allowed
+                        type: object
+                      requests:
+                        additionalProperties:
+                          type: string
+                        description: Requests describes the minimum amount of compute
+                          resources required
+                        type: object
+                    type: object
+                  securityContext:
+                    description: SecurityContext for unlock jobs
+                    properties:
+                      fsGroup:
+                        description: FSGroup defines a file system group ID for all
+                          containers
+                        format: int64
+                        type: integer
+                      runAsGroup:
+                        description: RunAsGroup is the GID to run the entrypoint of
+                          the container process
+                        format: int64
+                        type: integer
+                      runAsUser:
+                        description: RunAsUser is the UID to run the entrypoint of
+                          the container process
+                        format: int64
+                        type: integer
+                    type: object
+                  serviceAccount:
+                    description: ServiceAccount to use for unlock jobs
+                    type: string
+                required:
+                - image
+                type: object
+            required:
+            - alertmanagerUrl
+            - unlockJobTemplate
+            type: object
+          status:
+            description: VolSyncMonitorStatus defines the observed state of VolSyncMonitor
+            properties:
+              activeUnlocks:
+                description: ActiveUnlocks tracks currently running unlock operations
+                items:
+                  description: ActiveUnlock represents an active unlock operation
+                  properties:
+                    alertFingerprint:
+                      description: AlertFingerprint is the unique identifier of the
+                        alert
+                      type: string
+                    appName:
+                      description: AppName is the name of the application
+                      type: string
+                    jobName:
+                      description: JobName is the name of the unlock job
+                      type: string
+                    namespace:
+                      description: Namespace is the namespace of the VolSync resource
+                      type: string
+                    objectName:
+                      description: ObjectName is the name of the VolSync object
+                      type: string
+                    startTime:
+                      description: StartTime is when the unlock started
+                      format: date-time
+                      type: string
+                  required:
+                  - alertFingerprint
+                  - appName
+                  - jobName
+                  - namespace
+                  - objectName
+                  - startTime
+                  type: object
+                type: array
+              conditions:
+                description: Conditions represent the latest available observations
+                items:
+                  description: "Condition contains details for one aspect of the current
+                    state of this API Resource. --- This struct is intended for direct
+                    use as an array at the field path .status.conditions.  For example,
+                    \n type FooStatus struct{ // Represents the observations of a
+                    foo's current state. // Known .status.conditions.type are: \"Available\",
+                    \"Progressing\", and \"Degraded\" // +patchMergeKey=type // +patchStrategy=merge
+                    // +listType=map // +listMapKey=type Conditions []metav1.Condition
+                    `json:\"conditions,omitempty\" patchStrategy:\"merge\" patchMergeKey:\"type\"
+                    protobuf:\"bytes,1,rep,name=conditions\"` \n // other fields }"
+                  properties:
+                    lastTransitionTime:
+                      description: lastTransitionTime is the last time the condition
+                        transitioned from one status to another. This should be when
+                        the underlying condition changed.  If that is not known, then
+                        using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: message is a human readable message indicating
+                        details about the transition. This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: observedGeneration represents the .metadata.generation
+                        that the condition was set based upon. For instance, if .metadata.generation
+                        is currently 12, but the .status.conditions[x].observedGeneration
+                        is 9, the condition is out of date with respect to the current
+                        state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: reason contains a programmatic identifier indicating
+                        the reason for the condition's last transition. Producers
+                        of specific condition types may define expected values and
+                        meanings for this field, and whether the values are considered
+                        a guaranteed API. The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                        --- Many .condition.type values are consistent across resources
+                        like Available, but because arbitrary conditions can be useful
+                        (see .node.status.conditions), the ability to deconflict is
+                        important. The regex it matches is (dns1123SubdomainFmt/)?(qualifiedNameFmt)
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              lastCheckTime:
+                description: LastCheckTime is when the monitor last checked for alerts
+                format: date-time
+                type: string
+              lastError:
+                description: LastError contains the last error encountered
+                type: string
+              phase:
+                description: Phase represents the current phase of the monitor
+                type: string
+              totalUnlocksCreated:
+                description: TotalUnlocksCreated is the total number of unlock jobs
+                  created
+                format: int32
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

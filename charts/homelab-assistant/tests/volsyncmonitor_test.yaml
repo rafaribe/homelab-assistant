@@ -1,0 +1,65 @@
+suite: test volsyncmonitor
+templates:
+  - volsyncmonitor.yaml
+tests:
+  - it: should create volsyncmonitor when enabled
+    set:
+      volsyncMonitor.enabled: true
+    asserts:
+      - isKind:
+          of: VolSyncMonitor
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-homelab-assistant-volsync-monitor
+      - equal:
+          path: spec.enabled
+          value: true
+
+  - it: should not create volsyncmonitor when disabled
+    set:
+      volsyncMonitor.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should set custom concurrent unlocks
+    set:
+      volsyncMonitor.enabled: true
+      volsyncMonitor.maxConcurrentUnlocks: 5
+    asserts:
+      - equal:
+          path: spec.maxConcurrentUnlocks
+          value: 5
+
+  - it: should set custom TTL
+    set:
+      volsyncMonitor.enabled: true
+      volsyncMonitor.ttlSecondsAfterFinished: 7200
+    asserts:
+      - equal:
+          path: spec.ttlSecondsAfterFinished
+          value: 7200
+
+  - it: should set custom lock error patterns
+    set:
+      volsyncMonitor.enabled: true
+      volsyncMonitor.lockErrorPatterns:
+        - "custom error pattern"
+        - "another pattern"
+    asserts:
+      - equal:
+          path: spec.lockErrorPatterns[0]
+          value: "custom error pattern"
+      - equal:
+          path: spec.lockErrorPatterns[1]
+          value: "another pattern"
+
+  - it: should configure unlock job template
+    set:
+      volsyncMonitor.enabled: true
+      volsyncMonitor.unlockJob.image.repository: "custom/image"
+      volsyncMonitor.unlockJob.image.tag: "v1.0.0"
+    asserts:
+      - equal:
+          path: spec.unlockJobTemplate.image
+          value: "custom/image:v1.0.0"

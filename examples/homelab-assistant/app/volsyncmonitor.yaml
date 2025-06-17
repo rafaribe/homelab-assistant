@@ -1,0 +1,37 @@
+# yaml-language-server: $schema=https://kubernetes-schemas.pages.dev/homelab.rafaribe.com/volsyncmonitor_v1alpha1.json
+apiVersion: homelab.rafaribe.com/v1alpha1
+kind: VolSyncMonitor
+metadata:
+  name: main-monitor
+spec:
+  enabled: true
+  maxConcurrentUnlocks: 3
+  ttlSecondsAfterFinished: 3600
+  
+  lockErrorPatterns:
+    - "repository is already locked"
+    - "unable to create lock"
+    - "repository locked"
+    - "lock.*already.*exists"
+    - "failed to create lock"
+    - "repository.*locked.*by.*another.*process"
+    - "timeout.*waiting.*for.*lock"
+    - "could not create lock"
+  
+  unlockJobTemplate:
+    image: "quay.io/backube/volsync:0.13.0-rc.2"
+    command: ["restic"]
+    args: ["unlock", "--remove-all"]
+    
+    resources:
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+    
+    securityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000

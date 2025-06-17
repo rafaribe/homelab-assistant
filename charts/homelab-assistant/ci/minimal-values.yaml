@@ -1,0 +1,17 @@
+# Minimal test values for chart testing
+controller:
+  image:
+    repository: ghcr.io/rafaribe/homelab-assistant
+    tag: latest
+
+volsyncMonitor:
+  enabled: false
+
+metrics:
+  enabled: false
+
+serviceAccount:
+  create: true
+
+rbac:
+  create: true

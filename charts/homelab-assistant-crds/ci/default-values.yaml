@@ -1,0 +1,2 @@
+# Default test values for CRDs chart testing
+installCRDs: true

@@ -1,0 +1,22 @@
+apiVersion: v2
+name: homelab-assistant-crds
+description: Custom Resource Definitions for Homelab Assistant Controllers
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/rafaribe/homelab-assistant
+sources:
+  - https://github.com/rafaribe/homelab-assistant
+maintainers:
+  - name: rafaribe
+    email: rafa@rafaribe.com
+keywords:
+  - homelab
+  - automation
+  - volsync
+  - restic
+  - backup
+  - kubernetes
+  - crds
+annotations:
+  category: Automation

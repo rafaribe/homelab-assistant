@@ -1,0 +1,24 @@
+{{- if .Values.metrics.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "volsync-monitor.fullname" . }}-metrics
+  namespace: {{ include "volsync-monitor.namespace" . }}
+  labels:
+    {{- include "volsync-monitor.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics
+  {{- with (include "volsync-monitor.annotations" .) }}
+  annotations:
+    {{- . | nindent 4 }}
+  {{- end }}
+spec:
+  type: ClusterIP
+  ports:
+  - name: metrics
+    port: {{ .Values.metrics.port }}
+    protocol: TCP
+    targetPort: metrics
+  selector:
+    {{- include "volsync-monitor.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: controller
+{{- end }}
