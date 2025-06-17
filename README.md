@@ -169,3 +169,18 @@ Contributions are welcome! Please see our [Contributing Guide](CONTRIBUTING.md).
 ## 📄 **License**
 
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
+## 🔧 **CI/CD**
+
+The project uses GitHub Actions with mise for consistent tooling:
+
+- **Main CI** (`.github/workflows/ci.yml`) - Runs on every push/PR
+- **Schema Publishing** (`.github/workflows/schemas.yml`) - Publishes CRD schemas to GitHub Pages
+
+**Troubleshooting**: If you encounter issues with the `jdx/mise-action`, you can install mise manually in CI:
+```yaml
+- name: Install mise manually
+  run: |
+    curl https://mise.run | sh
+    echo "$HOME/.local/bin" >> $GITHUB_PATH
+```

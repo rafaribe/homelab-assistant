@@ -5,7 +5,8 @@ run:
   go: "1.22"
 
 output:
-  format: colored-line-number
+  formats:
+    colored-line-number: stdout
 
 # Use default linters (errcheck, govet, ineffassign, staticcheck, unused)
 linters:

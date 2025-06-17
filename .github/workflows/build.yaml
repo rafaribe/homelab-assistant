@@ -49,9 +49,10 @@ jobs:
           cache: false
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v4
+        uses: golangci/golangci-lint-action@v6
         with:
           version: latest
+          args: --timeout=10m
 
       - name: Run Go tests
         run: make test
