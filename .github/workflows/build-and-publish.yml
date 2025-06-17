@@ -44,9 +44,25 @@ permissions:
   attestations: write
 
 jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install mise
+        uses: jdx/mise-action@v2
+
+      - name: Run tests
+        run: mise run test-all
+
   plan:
     name: Plan
     runs-on: ubuntu-latest
+    needs: [test]  # Only run if tests pass
     outputs:
       platforms: ${{ steps.platforms.outputs.platforms }}
       should-push: ${{ steps.push-decision.outputs.should-push }}
@@ -170,7 +186,7 @@ jobs:
 
   build:
     name: Build (${{ matrix.platform }})
-    needs: ["plan"]
+    needs: ["test", "plan"]  # Require both tests and planning to pass
     strategy:
       fail-fast: false
       matrix:
@@ -215,7 +231,7 @@ jobs:
           set: |
             *.args.VENDOR=${{ github.repository_owner }}
             *.cache-from=${{ format('type=registry,ref=ghcr.io/{0}/build_cache:homelab-assistant-{1},mode=max', github.repository_owner, steps.target.outputs.arch) }}
-            *.cache-to=${{ format('type=registry,ref=ghcr.io/{0}/build_cache:homelab-assistant-{1},mode=max,compression=zstd,force-compression=true', github.repository_owner, steps.target.outputs.arch) }}
+              *.cache-to=${{ format('type=registry,ref=ghcr.io/{0}/build_cache:homelab-assistant-{1},mode=max,compression=zstd,force-compression=true', github.repository_owner, steps.target.outputs.arch) }}
             *.labels.org.opencontainers.image.title=homelab-assistant
             *.labels.org.opencontainers.image.url=https://ghcr.io/${{ github.repository }}
             *.labels.org.opencontainers.image.revision=${{ github.sha }}
@@ -226,11 +242,6 @@ jobs:
           source: .
           targets: image
           workdir: .
-
-      - name: Run Application Tests
-        uses: ./.github/workflows/test-image.yml
-        with:
-          image: homelab-assistant:test
 
       - name: Push to Registry
         if: ${{ needs.plan.outputs.should-push == 'true' }}
@@ -270,7 +281,7 @@ jobs:
     if: ${{ needs.plan.outputs.should-push == 'true' }}
     name: Merge
     runs-on: ubuntu-latest
-    needs: ["plan", "build"]
+    needs: ["test", "plan", "build"]  # Ensure tests passed before merging
     steps:
       - name: Download metadata
         uses: actions/download-artifact@v4

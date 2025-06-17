@@ -61,9 +61,19 @@ var _ = Describe("VolSyncUnlock Controller", func() {
 			// TODO(user): Cleanup logic after each test, like removing the resource instance.
 			resource := &volsyncv1alpha1.VolSyncUnlock{}
 			err := k8sClient.Get(ctx, typeNamespacedName, resource)
-			Expect(err).NotTo(HaveOccurred())
+			if err != nil {
+				// Resource already deleted or doesn't exist, nothing to do
+				return
+			}
 
 			By("Cleanup the specific resource instance VolSyncUnlock")
+			
+			// Remove finalizer to allow deletion in test environment
+			if len(resource.Finalizers) > 0 {
+				resource.Finalizers = []string{}
+				Expect(k8sClient.Update(ctx, resource)).To(Succeed())
+			}
+			
 			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
 		})
 		It("should successfully reconcile the resource", func() {

@@ -183,15 +183,26 @@ run = [
 description = "Setup Kubernetes binaries for controller tests"
 run = [
     "echo '🔧 Setting up envtest binaries...'",
-    "setup-envtest use 1.28.3 --bin-dir ./bin/k8s",
+    "setup-envtest use 1.28.3 --bin-dir ./bin",
     "echo '✅ Envtest binaries ready'",
 ]
 
 [tasks.test-controller]
-description = "Run controller tests with proper environment"
+description = "Run controller tests with envtest (fast)"
 depends = ["setup-envtest-bins"]
 run = [
-    "echo '🧪 Running controller tests...'",
+    "echo '🧪 Running controller tests with envtest...'",
+    "go test ./internal/controller -v -coverprofile=controller-coverage.out",
+]
+
+[tasks.test-controller-kind]
+description = "Run controller tests against kind cluster"
+run = [
+    "echo '🧪 Running controller tests against kind cluster...'",
+    "# Ensure we're using the kind cluster",
+    "./scripts/k8s-safety-check.sh",
+    "# Run tests with kind cluster as the target",
+    "export USE_EXISTING_CLUSTER=true",
     "go test ./internal/controller -v -coverprofile=controller-coverage.out",
 ]
 
