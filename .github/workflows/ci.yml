@@ -25,17 +25,10 @@ jobs:
         mise list
     
     - name: Run CI pipeline
-      run: mise run ci
+      run: mise run ci-fast
     
     - name: Generate coverage report
-      run: mise exec -- go test ./... -coverprofile=coverage.out -covermode=atomic
-    
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
-      with:
-        file: ./coverage.out
-        flags: unittests
-        name: codecov-umbrella
+      run: mise run coverage-ci
 
   build-docker:
     runs-on: ubuntu-latest
@@ -72,6 +65,9 @@ jobs:
     
     - name: Set up Kubernetes environment
       run: mise run k8s-setup
+    
+    - name: Run controller tests
+      run: mise run test-controller
     
     - name: Verify cluster
       run: mise run safety-check

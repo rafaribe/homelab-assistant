@@ -11,6 +11,8 @@ kind = "latest"
 kubectl = "latest"
 # Build tools
 kustomize = "latest"
+# Controller testing tools
+setup-envtest = "latest"  # For controller-runtime tests
 
 [env]
 # Go environment
@@ -103,8 +105,12 @@ description = "Set up development environment"
 depends = ["generate", "manifests", "fmt", "tidy"]
 
 [tasks.ci]
-description = "Run CI pipeline (lint, vet, build, test)"
-depends = ["lint", "vet", "build", "test-unit"]
+description = "Full CI pipeline (all tests)"
+depends = ["lint", "vet", "build", "test-all"]
+
+[tasks.ci-fast]
+description = "Fast CI pipeline (unit tests only)"
+depends = ["lint", "vet", "build", "test-unit-only"]
 
 [tasks.pre-commit]
 description = "Pre-commit checks"
@@ -164,13 +170,47 @@ run = [
     "cd _site && python3 -m http.server 8000 2>/dev/null || python -m SimpleHTTPServer 8000",
 ]
 
-[tasks.preview-schemas]
-description = "Generate and preview schemas locally"
-depends = ["validate-schemas"]
+[tasks.setup-envtest-bins]
+description = "Setup Kubernetes binaries for controller tests"
 run = [
-    "echo '🚀 Schema preview ready!'",
-    "echo '📁 Generated files:'",
-    "ls -la _site/schemas/",
-    "echo ''",
-    "echo '💡 Run \"mise run serve-schemas\" to preview locally'",
+    "echo '🔧 Setting up envtest binaries...'",
+    "setup-envtest use 1.28.3 --bin-dir ./bin/k8s",
+    "echo '✅ Envtest binaries ready'",
+]
+
+[tasks.test-controller]
+description = "Run controller tests with proper environment"
+depends = ["setup-envtest-bins"]
+run = [
+    "echo '🧪 Running controller tests...'",
+    "go test ./internal/controller -v -coverprofile=controller-coverage.out",
+]
+
+[tasks.test-unit-only]
+description = "Run only unit tests (no controller tests)"
+run = [
+    "echo '🧪 Running unit tests only...'",
+    "go test ./api/v1alpha1 ./cmd ./internal/helpers -v",
+]
+
+[tasks.test-all]
+description = "Run all tests including controller tests"
+depends = ["test-unit-only", "test-controller"]
+
+[tasks.coverage]
+description = "Generate coverage report for all packages"
+depends = ["setup-envtest-bins"]
+run = [
+    "echo '📊 Generating coverage report...'",
+    "go test ./... -coverprofile=coverage.out -covermode=atomic",
+    "go tool cover -html=coverage.out -o coverage.html",
+    "echo '✅ Coverage report generated: coverage.html'",
+]
+
+[tasks.coverage-ci]
+description = "Generate coverage report for CI (without HTML)"
+depends = ["setup-envtest-bins"]
+run = [
+    "echo '📊 Generating coverage report for CI...'",
+    "go test ./... -coverprofile=coverage.out -covermode=atomic",
 ]

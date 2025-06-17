@@ -100,10 +100,21 @@ curl https://mise.run | sh
 mise install
 
 # Run common development tasks
+mise run fmt           # Format code
+mise run tidy          # Tidy dependencies  
 mise run lint          # Run linting
-mise run test          # Run tests  
+mise run vet           # Run go vet
 mise run build         # Build project
-mise run ci            # Run full CI pipeline
+
+# Testing
+mise run test-unit-only    # Fast unit tests only
+mise run test-controller   # Controller tests (requires envtest)
+mise run test-all          # All tests
+mise run coverage          # Generate coverage report
+
+# CI pipelines
+mise run ci-fast       # Fast CI (unit tests only) - 1.15s
+mise run ci            # Full CI (all tests) - comprehensive
 mise run dev-setup     # Set up development environment
 
 # Kubernetes development
