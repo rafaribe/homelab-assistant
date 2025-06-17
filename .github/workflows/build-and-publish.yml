@@ -14,6 +14,12 @@ on:
         required: false
         default: false
 
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
 jobs:
   plan:
     name: Plan
@@ -88,7 +94,7 @@ jobs:
         with:
           flavor: latest=false
           images: |
-            ghcr.io/${{ github.repository }}
+            ghcr.io/${{ github.repository_owner }}/homelab-assistant
           tags: |
             # CalVer-based tagging (primary scheme)
             type=raw,value=${{ steps.app-versions.outputs.calver }},enable=${{ github.ref_name == 'main' }}
@@ -169,7 +175,7 @@ jobs:
             *.labels.org.opencontainers.image.url=https://ghcr.io/${{ github.repository }}
             *.labels.org.opencontainers.image.revision=${{ github.sha }}
             *.labels.org.opencontainers.image.vendor=${{ github.repository_owner }}
-            ${{ (github.event_name == 'push' || inputs.release) && format('*.output=type=image,name=ghcr.io/{0},push-by-digest=true,name-canonical=true,push=true', github.repository) || '*.output=type=docker,name=homelab-assistant:test' }}
+            ${{ (github.event_name == 'push' || inputs.release) && format('*.output=type=image,name=ghcr.io/{0}/homelab-assistant,push-by-digest=true,name-canonical=true,push=true', github.repository_owner) || '*.output=type=docker,name=homelab-assistant:test' }}
             *.platform=${{ matrix.platform }}
             *.tags=
           source: .
@@ -231,8 +237,8 @@ jobs:
         working-directory: /tmp/digests
         run: |
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' < /tmp/docker-metadata-action-bake.json) \
-            $(printf 'ghcr.io/${{ github.repository }}@sha256:%s ' *)
+            $(printf 'ghcr.io/${{ github.repository_owner }}/homelab-assistant@sha256:%s ' *)
 
       - name: Inspect image
         run: |
-          docker buildx imagetools inspect ghcr.io/${{ github.repository }}:rolling
+          docker buildx imagetools inspect ghcr.io/${{ github.repository_owner }}/homelab-assistant:rolling
