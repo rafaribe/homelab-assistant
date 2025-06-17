@@ -151,12 +151,13 @@ jobs:
               # Package the chart
               helm package "$chart_dir" --destination ./packaged-charts/
               
-              # Push to OCI registry
+              # Push to OCI registry with -chart suffix to distinguish from Docker images
               chart_package="./packaged-charts/${chart_name}-${chart_version}.tgz"
+              oci_chart_name="${chart_name}-chart"
               if [ -f "$chart_package" ]; then
-                echo "🚀 Pushing $chart_name:$chart_version to OCI registry..."
-                helm push "$chart_package" oci://ghcr.io/${{ github.repository_owner }}/charts
-                echo "✅ Successfully pushed $chart_name:$chart_version"
+                echo "🚀 Pushing ${oci_chart_name}:$chart_version to OCI registry..."
+                helm push "$chart_package" oci://ghcr.io/${{ github.repository_owner }}/${oci_chart_name}
+                echo "✅ Successfully pushed ${oci_chart_name}:$chart_version"
               else
                 echo "❌ Chart package not found: $chart_package"
                 exit 1
