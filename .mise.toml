@@ -5,7 +5,7 @@
 # Go version management
 go = "1.22"
 # Linting and code quality
-golangci-lint = "latest"
+golangci-lint = "1.61.0"  # Use same version as GitHub Action
 # Kubernetes tools (with kind safeguards)
 kind = "latest"
 kubectl = "latest"

@@ -509,7 +509,7 @@ var _ = Describe("VolSyncMonitor Controller", func() {
 					},
 				}
 				Expect(k8sClient.Create(ctx, pod)).To(Succeed())
-				defer k8sClient.Delete(ctx, pod)
+				defer func() { _ = k8sClient.Delete(ctx, pod) }()
 
 				monitor := volsyncv1alpha1.VolSyncMonitor{
 					Spec: volsyncv1alpha1.VolSyncMonitorSpec{
@@ -561,7 +561,7 @@ var _ = Describe("VolSyncMonitor Controller", func() {
 					},
 				}
 				Expect(k8sClient.Create(ctx, pod)).To(Succeed())
-				defer k8sClient.Delete(ctx, pod)
+				defer func() { _ = k8sClient.Delete(ctx, pod) }()
 
 				monitor := volsyncv1alpha1.VolSyncMonitor{
 					Spec: volsyncv1alpha1.VolSyncMonitorSpec{
@@ -613,7 +613,7 @@ var _ = Describe("VolSyncMonitor Controller", func() {
 					},
 				}
 				Expect(k8sClient.Create(ctx, pod)).To(Succeed())
-				defer k8sClient.Delete(ctx, pod)
+				defer func() { _ = k8sClient.Delete(ctx, pod) }()
 
 				monitor := volsyncv1alpha1.VolSyncMonitor{
 					Spec: volsyncv1alpha1.VolSyncMonitorSpec{

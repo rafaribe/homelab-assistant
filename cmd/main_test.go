@@ -109,10 +109,12 @@ func TestEnvironmentVariables(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Save original value
 			originalVal := os.Getenv(tt.envVar)
-			defer os.Setenv(tt.envVar, originalVal)
+			defer func() {
+				_ = os.Setenv(tt.envVar, originalVal) // Ignore error in test cleanup
+			}()
 
 			// Set test value
-			os.Setenv(tt.envVar, tt.setValue)
+			_ = os.Setenv(tt.envVar, tt.setValue) // Ignore error in test setup
 
 			// Test the function
 			result := tt.testFunc(os.Getenv(tt.envVar))

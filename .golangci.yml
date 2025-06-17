@@ -1,4 +1,5 @@
-version: 2
+# golangci-lint configuration compatible with v1.61.0
+# This version matches the GitHub Action to ensure consistency
 
 run:
   timeout: 10m
@@ -6,7 +7,7 @@ run:
 
 output:
   formats:
-    colored-line-number: stdout
+    - format: colored-line-number
 
 # Use default linters (errcheck, govet, ineffassign, staticcheck, unused)
 linters:
@@ -15,14 +16,7 @@ linters:
 
 issues:
   exclude-rules:
-    # Exclude kubebuilder generated files
+    # Exclude kubebuilder generated files from all linters
     - path: zz_generated\.deepcopy\.go
       linters:
         - all
-    # Allow unchecked errors in test files for cleanup operations
-    - path: _test\.go
-      linters:
-        - errcheck
-  exclude:
-    # Ignore defer cleanup errors in tests
-    - "Error return value of.*is not checked"
