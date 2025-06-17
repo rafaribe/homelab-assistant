@@ -1,6 +1,8 @@
-# Homelab Assistant CRDs Helm Chart
+# homelab-assistant-crds
 
-Custom Resource Definitions for the Homelab Assistant controllers.
+Custom Resource Definitions for Homelab Assistant Controllers
+
+![Version: 0.1.0](https://img.shields.io/badge/Version-0.1.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.1.0](https://img.shields.io/badge/AppVersion-0.1.0-informational?style=flat-square)
 
 ## Prerequisites
 
@@ -19,9 +21,11 @@ helm install homelab-assistant-crds \
 
 ## Configuration
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `installCRDs` | Install CRDs | `true` |
+## Values
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| installCRDs | bool | `true` | CRDs are installed as templates to ensure proper lifecycle management |
 
 ## Custom Resources
 
@@ -87,3 +91,14 @@ helm plugin install https://github.com/helm-unittest/helm-unittest.git
 # Run tests
 helm unittest charts/homelab-assistant-crds
 ```
+
+## Maintainers
+
+| Name | Email | Url |
+| ---- | ------ | --- |
+| rafaribe | <rafa@rafaribe.com> |  |
+
+## Source Code
+
+* <https://github.com/rafaribe/homelab-assistant>
+
