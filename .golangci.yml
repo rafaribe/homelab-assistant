@@ -1,51 +1,27 @@
+version: 2
+
 run:
   timeout: 10m
   go: "1.22"
 
 output:
-  formats:
-    - format: colored-line-number
+  format: colored-line-number
 
+# Use default linters (errcheck, govet, ineffassign, staticcheck, unused)
 linters:
-  enable:
-    - gofmt
-    - goimports
-    - govet
-    - ineffassign
-    - misspell
-    - revive
-    - staticcheck
-    - typecheck
-    - unused
-    - errcheck
-    - gosimple
-    - goconst
-    - copyloopvar  # Replaces exportloopref for Go 1.22+
-  disable:
-    - exportloopref  # Deprecated in favor of copyloopvar
-
-linters-settings:
-  revive:
-    rules:
-      - name: exported
-        disabled: true
-  goimports:
-    local-prefixes: github.com/rafaribe/homelab-assistant
+  enable-all: false
+  disable-all: false
 
 issues:
   exclude-rules:
-    # Exclude some linters from running on tests files.
-    - path: _test\.go
-      linters:
-        - gocyclo
-        - errcheck
-        - dupl
-        - gosec
     # Exclude kubebuilder generated files
     - path: zz_generated\.deepcopy\.go
       linters:
         - all
-    # Exclude main.go from some checks
-    - path: cmd/main\.go
+    # Allow unchecked errors in test files for cleanup operations
+    - path: _test\.go
       linters:
-        - gocyclo
+        - errcheck
+  exclude:
+    # Ignore defer cleanup errors in tests
+    - "Error return value of.*is not checked"

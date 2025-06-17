@@ -295,7 +295,7 @@ func TestVolSyncUnlockList_DeepCopyObject(t *testing.T) {
 func TestVolSyncUnlockStatus_CompletedJob(t *testing.T) {
 	startTime := metav1.Now()
 	completionTime := metav1.Now()
-	
+
 	status := VolSyncUnlockStatus{
 		Phase:          VolSyncUnlockPhaseSucceeded,
 		JobName:        "completed-job",

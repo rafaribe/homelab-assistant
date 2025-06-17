@@ -1,0 +1,9 @@
+# Global ownership
+* @rafaribe
+
+# API and CRD changes require extra review
+/api/ @rafaribe
+/config/crd/ @rafaribe
+
+# Schema publishing workflow
+/.github/workflows/schemas.yml @rafaribe

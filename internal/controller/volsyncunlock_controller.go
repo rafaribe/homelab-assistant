@@ -85,7 +85,7 @@ func (r *VolSyncUnlockReconciler) handlePending(ctx context.Context, volsyncUnlo
 		volsyncUnlock.Status.Phase = volsyncv1alpha1.VolSyncUnlockPhasePending
 		volsyncUnlock.Status.Message = "Preparing unlock operation"
 		volsyncUnlock.Status.StartTime = &metav1.Time{Time: time.Now()}
-		
+
 		if err := r.Status().Update(ctx, volsyncUnlock); err != nil {
 			logger.Error(err, "Failed to update status to pending")
 			return ctrl.Result{}, err
@@ -98,7 +98,9 @@ func (r *VolSyncUnlockReconciler) handlePending(ctx context.Context, volsyncUnlo
 		logger.Error(err, "Failed to create unlock job")
 		volsyncUnlock.Status.Phase = volsyncv1alpha1.VolSyncUnlockPhaseFailed
 		volsyncUnlock.Status.Message = fmt.Sprintf("Failed to create unlock job: %v", err)
-		r.Status().Update(ctx, volsyncUnlock)
+		if updateErr := r.Status().Update(ctx, volsyncUnlock); updateErr != nil {
+			logger.Error(updateErr, "Failed to update status after job creation failure")
+		}
 		return ctrl.Result{}, err
 	}
 
@@ -217,10 +219,10 @@ func (r *VolSyncUnlockReconciler) createUnlockJob(ctx context.Context, volsyncUn
 			Name:      jobName,
 			Namespace: volsyncUnlock.Spec.Namespace,
 			Labels: map[string]string{
-				"app":                           "volsync-unlock",
-				"homelab.rafaribe.com/app":        volsyncUnlock.Spec.AppName,
-				"homelab.rafaribe.com/object":     volsyncUnlock.Spec.ObjectName,
-				"homelab.rafaribe.com/unlock-cr":  volsyncUnlock.Name,
+				"app":                            "volsync-unlock",
+				"homelab.rafaribe.com/app":       volsyncUnlock.Spec.AppName,
+				"homelab.rafaribe.com/object":    volsyncUnlock.Spec.ObjectName,
+				"homelab.rafaribe.com/unlock-cr": volsyncUnlock.Name,
 			},
 		},
 		Spec: batchv1.JobSpec{
@@ -243,8 +245,8 @@ func (r *VolSyncUnlockReconciler) createUnlockJob(ctx context.Context, volsyncUn
 					},
 					Containers: []corev1.Container{
 						{
-							Name:  "restic-unlock",
-							Image: "restic/restic:latest",
+							Name:    "restic-unlock",
+							Image:   "restic/restic:latest",
 							Command: []string{"/bin/sh", "-c"},
 							Args: []string{
 								fmt.Sprintf(`

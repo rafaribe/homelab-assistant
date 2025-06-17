@@ -1,0 +1,7 @@
+# Tool versions for asdf compatibility
+# This file is also read by mise
+go 1.22
+golangci-lint latest
+kind latest
+kubectl latest
+kustomize latest

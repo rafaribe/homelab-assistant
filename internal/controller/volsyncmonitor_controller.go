@@ -17,8 +17,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	volsyncv1alpha1 "github.com/rafaribe/homelab-assistant/api/v1alpha1"
 	"github.com/rafaribe/homelab-assistant/internal/helpers"
@@ -139,9 +139,9 @@ func (r *VolSyncMonitorReconciler) handleVolSyncJob(ctx context.Context, req ctr
 				logger.Error(err, "Failed to create unlock job")
 				continue
 			}
-			logger.Info("Created unlock job for failed VolSync job", 
-				"volsyncJob", job.Name, 
-				"app", appName, 
+			logger.Info("Created unlock job for failed VolSync job",
+				"volsyncJob", job.Name,
+				"app", appName,
 				"object", objectName)
 			break
 		}
@@ -157,7 +157,7 @@ func (r *VolSyncMonitorReconciler) isVolSyncJob(job *batchv1.Job) bool {
 			return true
 		}
 	}
-	
+
 	// Check job name patterns
 	return strings.HasPrefix(job.Name, "volsync-src-") || strings.HasPrefix(job.Name, "volsync-dst-")
 }
@@ -237,12 +237,12 @@ func (r *VolSyncMonitorReconciler) checkJobLogsForLockErrors(ctx context.Context
 				if regex.MatchString(logs) {
 					// Extract app info for metrics
 					appName, objectName := r.extractAppInfoFromJob(job)
-					
+
 					// Record metrics
 					helpers.RecordLockErrorDetected(job.Namespace, appName, objectName, regex.String())
-					
-					logger.Info("Lock error detected in pod logs", 
-						"pod", pod.Name, 
+
+					logger.Info("Lock error detected in pod logs",
+						"pod", pod.Name,
 						"job", job.Name,
 						"pattern", regex.String(),
 						"app", appName,
@@ -259,12 +259,12 @@ func (r *VolSyncMonitorReconciler) checkJobLogsForLockErrors(ctx context.Context
 func (r *VolSyncMonitorReconciler) getPodLogs(ctx context.Context, pod *corev1.Pod) (string, error) {
 	// For now, we'll check the pod status and events instead of logs
 	// This is simpler and doesn't require additional RBAC permissions for log streaming
-	
+
 	// Check pod status message
 	if pod.Status.Message != "" {
 		return pod.Status.Message, nil
 	}
-	
+
 	// Check container statuses
 	var messages []string
 	for _, containerStatus := range pod.Status.ContainerStatuses {
@@ -275,7 +275,7 @@ func (r *VolSyncMonitorReconciler) getPodLogs(ctx context.Context, pod *corev1.P
 			messages = append(messages, containerStatus.State.Waiting.Message)
 		}
 	}
-	
+
 	return strings.Join(messages, "\n"), nil
 }
 
@@ -316,13 +316,13 @@ func (r *VolSyncMonitorReconciler) canCreateUnlockJob(monitor volsyncv1alpha1.Vo
 	if maxConcurrent == 0 {
 		maxConcurrent = 3 // Default
 	}
-	
+
 	return len(monitor.Status.ActiveUnlocks) < int(maxConcurrent)
 }
 
 func (r *VolSyncMonitorReconciler) createUnlockJobForFailedJob(ctx context.Context, monitor *volsyncv1alpha1.VolSyncMonitor, failedJob *batchv1.Job, appName, objectName string) error {
 	logger := log.FromContext(ctx)
-	
+
 	// Record metrics
 	helpers.RecordUnlockJobCreated(failedJob.Namespace, appName, objectName)
 	helpers.RecordActiveUnlockJob(failedJob.Namespace, appName, objectName)
@@ -331,7 +331,7 @@ func (r *VolSyncMonitorReconciler) createUnlockJobForFailedJob(ctx context.Conte
 	now := metav1.Now()
 	monitor.Status.TotalUnlocksCreated++
 	monitor.Status.LastUnlockTime = &now
-	
+
 	// Add to active unlocks
 	jobName := fmt.Sprintf("volsync-unlock-%s-%s-%d", appName, objectName, time.Now().Unix())
 	activeUnlock := volsyncv1alpha1.ActiveUnlock{
@@ -342,7 +342,7 @@ func (r *VolSyncMonitorReconciler) createUnlockJobForFailedJob(ctx context.Conte
 		StartTime:        now,
 		AlertFingerprint: fmt.Sprintf("%s-%s-%s", failedJob.Namespace, appName, objectName),
 	}
-	
+
 	monitor.Status.ActiveUnlocks = append(monitor.Status.ActiveUnlocks, activeUnlock)
 
 	// Update status
@@ -380,11 +380,11 @@ func (r *VolSyncMonitorReconciler) createUnlockJobForFailedJob(ctx context.Conte
 			Name:      jobName,
 			Namespace: failedJob.Namespace,
 			Labels: map[string]string{
-				"app":                              "volsync-unlock",
-				"homelab.rafaribe.com/app":         appName,
-				"homelab.rafaribe.com/object":      objectName,
-				"homelab.rafaribe.com/monitor":     monitor.Name,
-				"homelab.rafaribe.com/failed-job":  failedJob.Name,
+				"app":                             "volsync-unlock",
+				"homelab.rafaribe.com/app":        appName,
+				"homelab.rafaribe.com/object":     objectName,
+				"homelab.rafaribe.com/monitor":    monitor.Name,
+				"homelab.rafaribe.com/failed-job": failedJob.Name,
 			},
 			// Copy annotations that might trigger admission policies
 			Annotations: map[string]string{
@@ -398,9 +398,9 @@ func (r *VolSyncMonitorReconciler) createUnlockJobForFailedJob(ctx context.Conte
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						"app":                              "volsync-unlock",
-						"homelab.rafaribe.com/app":         appName,
-						"homelab.rafaribe.com/object":      objectName,
+						"app":                         "volsync-unlock",
+						"homelab.rafaribe.com/app":    appName,
+						"homelab.rafaribe.com/object": objectName,
 					},
 					// Copy annotations to pod template for admission policies
 					Annotations: map[string]string{
@@ -462,10 +462,10 @@ func (r *VolSyncMonitorReconciler) createUnlockJobForFailedJob(ctx context.Conte
 func (r *VolSyncMonitorReconciler) buildResticEnvVars(ctx context.Context, appName, namespace, objectName string) ([]corev1.EnvVar, error) {
 	// Try different secret naming patterns that VolSync might use
 	secretNames := []string{
-		fmt.Sprintf("%s-volsync-nfs", appName),     // Pattern from your example
-		fmt.Sprintf("%s-restic-secret", appName),   // Common pattern
-		fmt.Sprintf("%s-volsync", appName),         // Alternative pattern
-		fmt.Sprintf("%s-secret", objectName),       // Object-based naming
+		fmt.Sprintf("%s-volsync-nfs", appName),   // Pattern from your example
+		fmt.Sprintf("%s-restic-secret", appName), // Common pattern
+		fmt.Sprintf("%s-volsync", appName),       // Alternative pattern
+		fmt.Sprintf("%s-secret", objectName),     // Object-based naming
 	}
 
 	var secretName string
@@ -489,7 +489,7 @@ func (r *VolSyncMonitorReconciler) buildResticEnvVars(ctx context.Context, appNa
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
-					Key: "RESTIC_REPOSITORY",
+					Key:                  "RESTIC_REPOSITORY",
 				},
 			},
 		},
@@ -498,7 +498,7 @@ func (r *VolSyncMonitorReconciler) buildResticEnvVars(ctx context.Context, appNa
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
-					Key: "RESTIC_PASSWORD",
+					Key:                  "RESTIC_PASSWORD",
 				},
 			},
 		},
@@ -529,8 +529,8 @@ func (r *VolSyncMonitorReconciler) buildResticEnvVars(ctx context.Context, appNa
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
-					Key:      envVar,
-					Optional: &optional,
+					Key:                  envVar,
+					Optional:             &optional,
 				},
 			},
 		})
@@ -564,8 +564,8 @@ func (r *VolSyncMonitorReconciler) discoverVolSyncVolumeConfig(ctx context.Conte
 		}
 	}
 
-	logger.Info("Discovered VolSync volume configuration from failed job", 
-		"volumes", len(volumes), 
+	logger.Info("Discovered VolSync volume configuration from failed job",
+		"volumes", len(volumes),
 		"volumeMounts", len(volumeMounts),
 		"failedJob", failedJob.Name)
 

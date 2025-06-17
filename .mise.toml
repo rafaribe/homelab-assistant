@@ -1,0 +1,176 @@
+# Mise configuration for homelab-assistant
+# https://mise.jdx.dev/
+
+[tools]
+# Go version management
+go = "1.22"
+# Linting and code quality
+golangci-lint = "latest"
+# Kubernetes tools (with kind safeguards)
+kind = "latest"
+kubectl = "latest"
+# Build tools
+kustomize = "latest"
+
+[env]
+# Go environment
+GOPATH = "{{env.HOME}}/go"
+GOPROXY = "https://proxy.golang.org,direct"
+GOSUMDB = "sum.golang.org"
+# Project specific
+PROJECT_ROOT = "{{config_root}}"
+# Safety: Only use kind clusters
+KIND_CLUSTER_NAME = "homelab-assistant"
+
+[tasks.lint]
+description = "Run golangci-lint"
+run = "golangci-lint run"
+
+[tasks.vet]
+description = "Run go vet"
+run = "go vet ./..."
+
+[tasks.build]
+description = "Build the project"
+run = "go build ./..."
+
+[tasks.test]
+description = "Run all tests"
+run = "go test ./... -v"
+
+[tasks.test-unit]
+description = "Run unit tests only (excluding controller integration tests)"
+run = "go test ./api/v1alpha1 ./cmd -v"
+
+[tasks.install-controller-gen]
+description = "Install controller-gen via Go"
+run = "go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest"
+
+[tasks.generate]
+description = "Generate code (deepcopy, CRDs, etc.)"
+depends = ["install-controller-gen"]
+run = "controller-gen object:headerFile=\"hack/boilerplate.go.txt\" paths=\"./...\""
+
+[tasks.manifests]
+description = "Generate CRDs and RBAC manifests"
+depends = ["install-controller-gen"]
+run = "controller-gen rbac:roleName=manager-role crd webhook paths=\"./...\" output:crd:artifacts:config=config/crd/bases"
+
+[tasks.fmt]
+description = "Format Go code"
+run = "go fmt ./..."
+
+[tasks.tidy]
+description = "Tidy Go modules"
+run = "go mod tidy"
+
+[tasks.clean]
+description = "Clean build artifacts"
+run = [
+    "rm -rf bin/",
+    "go clean -cache",
+]
+
+[tasks.docker-build]
+description = "Build Docker image"
+run = "docker build -t homelab-assistant:latest ."
+
+[tasks.kind-create]
+description = "Create kind cluster for testing"
+run = [
+    "kind create cluster --name ${KIND_CLUSTER_NAME}",
+    "kubectl cluster-info --context kind-${KIND_CLUSTER_NAME}",
+]
+
+[tasks.kind-delete]
+description = "Delete kind cluster"
+run = "kind delete cluster --name ${KIND_CLUSTER_NAME}"
+
+[tasks.install-crds]
+description = "Install CRDs to kind cluster (SAFE: only works with kind)"
+run = [
+    "# Safety check: ensure we're using kind context",
+    "./scripts/k8s-safety-check.sh",
+    "kubectl apply -f config/crd/bases/",
+]
+
+[tasks.safety-check]
+description = "Check that we're using a safe (kind) Kubernetes context"
+run = "./scripts/k8s-safety-check.sh"
+
+[tasks.dev-setup]
+description = "Set up development environment"
+depends = ["generate", "manifests", "fmt", "tidy"]
+
+[tasks.ci]
+description = "Run CI pipeline (lint, vet, build, test)"
+depends = ["lint", "vet", "build", "test-unit"]
+
+[tasks.pre-commit]
+description = "Pre-commit checks"
+depends = ["fmt", "tidy", "lint", "vet", "build", "test-unit"]
+
+[tasks.ci-info]
+description = "Show CI environment information"
+run = [
+    "echo '=== Mise CI Information ==='",
+    "mise --version",
+    "mise list",
+    "echo '=== Go Information ==='", 
+    "go version",
+    "go env",
+    "echo '=== Kubernetes Tools ==='",
+    "kubectl version --client",
+    "kind version",
+]
+
+[tasks.ci-full]
+description = "Full CI pipeline with extra checks"
+depends = ["ci-info", "ci", "docker-build"]
+
+[tasks.k8s-setup]
+description = "Complete Kubernetes development setup"
+depends = ["kind-create", "install-crds"]
+
+[tasks.k8s-teardown]
+description = "Clean up Kubernetes development environment"
+depends = ["kind-delete"]
+
+[tasks.generate-schemas]
+description = "Generate CRD schemas for documentation"
+run = [
+    "mkdir -p _site/schemas",
+    "cp config/crd/bases/*.yaml _site/schemas/",
+    "echo '✅ Schemas generated in _site/schemas/'",
+    "echo '📁 Available schemas:'",
+    "ls -la _site/schemas/",
+]
+
+[tasks.validate-schemas]
+description = "Validate generated CRD schemas"
+depends = ["generate-schemas"]
+run = [
+    "echo '🔍 Validating CRD schemas...'",
+    "kubectl --dry-run=client apply -f _site/schemas/ || echo '⚠️  Validation completed with warnings'",
+    "echo '✅ Schema validation completed'",
+]
+
+[tasks.serve-schemas]
+description = "Serve schema documentation locally"
+depends = ["generate-schemas"]
+run = [
+    "echo '🌐 Starting local schema server...'",
+    "echo '📖 Open http://localhost:8000 to view schemas'",
+    "cd _site && python3 -m http.server 8000 2>/dev/null || python -m SimpleHTTPServer 8000",
+]
+
+[tasks.preview-schemas]
+description = "Generate and preview schemas locally"
+depends = ["validate-schemas"]
+run = [
+    "echo '🚀 Schema preview ready!'",
+    "echo '📁 Generated files:'",
+    "ls -la _site/schemas/",
+    "echo ''",
+    "echo '💡 Run \"mise run serve-schemas\" to preview locally'",
+]

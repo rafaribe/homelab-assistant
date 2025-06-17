@@ -1,5 +1,8 @@
 # Homelab Assistant
 
+[![CI](https://github.com/rafaribe/homelab-assistant/workflows/CI/badge.svg)](https://github.com/rafaribe/homelab-assistant/actions)
+[![Built with Mise](https://img.shields.io/badge/built%20with-mise-blue)](https://mise.jdx.dev/)
+
 A collection of Kubernetes controllers designed to automate and simplify homelab operations.
 
 ## 🎯 **Controllers**
@@ -78,23 +81,76 @@ The controllers expose Prometheus metrics for comprehensive monitoring:
 
 ## 📚 **Documentation**
 
+- [Schema Documentation](https://rafaribe.github.io/homelab-assistant/) - CRD schemas and installation
 - [Deployment Guide](DEPLOYMENT.md) - Complete deployment instructions
 - [VolSync Monitor](VOLSYNC_MONITOR.md) - Technical documentation
 - [Examples](examples/) - Real-world deployment examples
 
 ## 🛠️ **Development**
 
+### Using Mise (Recommended)
+
+This project uses [mise](https://mise.jdx.dev/) for tool management and task automation everywhere - local development, CI, and production builds:
+
+```bash
+# Install mise (if not already installed)
+curl https://mise.run | sh
+
+# Install all project tools
+mise install
+
+# Run common development tasks
+mise run lint          # Run linting
+mise run test          # Run tests  
+mise run build         # Build project
+mise run ci            # Run full CI pipeline
+mise run dev-setup     # Set up development environment
+
+# Kubernetes development
+mise run k8s-setup     # Create kind cluster + install CRDs
+mise run k8s-teardown  # Clean up kind cluster
+mise run generate      # Generate deepcopy methods
+mise run manifests     # Generate CRDs and RBAC
+
+# Schema documentation
+mise run generate-schemas  # Generate CRD schemas
+mise run validate-schemas  # Validate schemas
+mise run preview-schemas   # Preview schemas locally
+mise run serve-schemas     # Serve docs at http://localhost:8000
+```
+
+### Traditional Make (Fallback)
+
+The Makefile provides fallbacks and integrates with mise when available:
+
 ```bash
 # Clone the repository
 git clone https://github.com/rafaribe/homelab-assistant.git
 cd homelab-assistant
 
-# Run tests
-make test
+# These automatically use mise if available
+make lint              # Linting
+make test              # Testing
+make build             # Building
+make docker-build      # Docker image
 
-# Build and run locally
-make run
+# Mise-specific targets
+make mise-ci           # Full CI via mise
+make mise-k8s-setup    # Kubernetes setup via mise
+make mise-k8s-teardown # Kubernetes cleanup via mise
 ```
+
+### Available Tools
+
+The project automatically manages these tools via mise:
+- **Go 1.22** - Programming language
+- **golangci-lint** - Code linting
+- **controller-gen** - Kubernetes code generation
+- **kubectl** - Kubernetes CLI (with kind-only safeguards)
+- **kind** - Local Kubernetes clusters for testing
+- **kustomize** - Configuration management
+
+**Safety Features**: All kubectl operations are restricted to kind clusters only.
 
 ## 📈 **Real-World Example**
 

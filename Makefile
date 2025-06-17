@@ -1,3 +1,16 @@
+# Mise integration - check if mise is available and use it for tool management
+MISE_AVAILABLE := $(shell command -v mise 2> /dev/null)
+ifdef MISE_AVAILABLE
+    # Use mise to ensure tools are available
+    MISE_PREFIX := mise exec --
+    MISE_INSTALL := mise install
+    MISE_RUN := mise run
+else
+    MISE_PREFIX :=
+    MISE_INSTALL := @echo "mise not available, using system tools"
+    MISE_RUN := @echo "mise not available, running traditional command:"
+endif
+
 # VERSION defines the project version for the bundle.
 # Update this value when you upgrade the version of your project.
 # To re-generate a bundle for another specific version without changing the standard setup, you can:
@@ -377,3 +390,66 @@ catalog-build: opm ## Build a catalog image.
 .PHONY: catalog-push
 catalog-push: ## Push a catalog image.
 	$(MAKE) docker-push IMG=$(CATALOG_IMG)
+##@ Mise Integration
+
+.PHONY: mise-install
+mise-install: ## Install all tools via mise
+	$(MISE_INSTALL)
+
+.PHONY: mise-ci
+mise-ci: ## Run full CI pipeline via mise
+ifdef MISE_AVAILABLE
+	$(MISE_RUN) ci
+else
+	@echo "mise not available, running traditional CI"
+	$(MAKE) lint vet build test
+endif
+
+.PHONY: mise-ci-full
+mise-ci-full: ## Run comprehensive CI pipeline via mise
+ifdef MISE_AVAILABLE
+	$(MISE_RUN) ci-full
+else
+	@echo "mise not available, running traditional CI"
+	$(MAKE) lint vet build test docker-build
+endif
+
+.PHONY: mise-k8s-setup
+mise-k8s-setup: ## Set up Kubernetes development environment via mise
+ifdef MISE_AVAILABLE
+	$(MISE_RUN) k8s-setup
+else
+	@echo "mise not available, use 'make kind-create && make install'"
+endif
+
+.PHONY: mise-k8s-teardown
+mise-k8s-teardown: ## Clean up Kubernetes development environment via mise
+ifdef MISE_AVAILABLE
+	$(MISE_RUN) k8s-teardown
+else
+	@echo "mise not available, use 'make kind-delete'"
+endif
+
+.PHONY: lint
+lint: ## Run golangci-lint (can use mise if available)
+ifdef MISE_AVAILABLE
+	$(MISE_PREFIX) golangci-lint run
+else
+	golangci-lint run
+endif
+
+.PHONY: vet
+vet: ## Run go vet (can use mise if available)
+ifdef MISE_AVAILABLE
+	$(MISE_PREFIX) go vet ./...
+else
+	go vet ./...
+endif
+
+.PHONY: docker-build
+docker-build: ## Build Docker image (can use mise if available)
+ifdef MISE_AVAILABLE
+	$(MISE_RUN) docker-build
+else
+	docker build -t homelab-assistant:latest .
+endif

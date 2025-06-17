@@ -7,6 +7,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
+const (
+	testNamespace = "test-namespace"
+)
+
 func TestVolSyncMonitorSpec_Defaults(t *testing.T) {
 	spec := VolSyncMonitorSpec{
 		Enabled:              true,
@@ -53,7 +57,7 @@ func TestActiveUnlock_Fields(t *testing.T) {
 	now := metav1.Now()
 	unlock := ActiveUnlock{
 		AppName:          "test-app",
-		Namespace:        "test-namespace",
+		Namespace:        testNamespace,
 		ObjectName:       "test-object",
 		JobName:          "test-job",
 		StartTime:        now,
@@ -64,8 +68,8 @@ func TestActiveUnlock_Fields(t *testing.T) {
 		t.Errorf("Expected AppName to be 'test-app', got %v", unlock.AppName)
 	}
 
-	if unlock.Namespace != "test-namespace" {
-		t.Errorf("Expected Namespace to be 'test-namespace', got %v", unlock.Namespace)
+	if unlock.Namespace != testNamespace {
+		t.Errorf("Expected Namespace to be '%s', got %v", testNamespace, unlock.Namespace)
 	}
 
 	if unlock.ObjectName != "test-object" {
@@ -161,7 +165,7 @@ func TestVolSyncMonitor_ObjectMeta(t *testing.T) {
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-monitor",
-			Namespace: "test-namespace",
+			Namespace: testNamespace,
 		},
 		Spec: VolSyncMonitorSpec{
 			Enabled: true,
@@ -175,8 +179,8 @@ func TestVolSyncMonitor_ObjectMeta(t *testing.T) {
 		t.Errorf("Expected Name to be 'test-monitor', got %v", monitor.Name)
 	}
 
-	if monitor.Namespace != "test-namespace" {
-		t.Errorf("Expected Namespace to be 'test-namespace', got %v", monitor.Namespace)
+	if monitor.Namespace != testNamespace {
+		t.Errorf("Expected Namespace to be '%s', got %v", testNamespace, monitor.Namespace)
 	}
 
 	if monitor.APIVersion != "homelab.rafaribe.com/v1alpha1" {
@@ -268,12 +272,12 @@ func TestVolSyncMonitor_DeepCopy(t *testing.T) {
 	original := &VolSyncMonitor{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-monitor",
-			Namespace: "test-namespace",
+			Namespace: testNamespace,
 		},
 		Spec: VolSyncMonitorSpec{
 			Enabled: true,
 			UnlockJobTemplate: UnlockJobTemplate{
-				Image: "test-image",
+				Image:   "test-image",
 				Command: []string{"restic"},
 				Args:    []string{"unlock"},
 			},

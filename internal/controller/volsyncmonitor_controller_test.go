@@ -448,10 +448,10 @@ var _ = Describe("VolSyncMonitor Controller", func() {
 					"memory": "512Mi",
 				}
 				resourceList := reconciler.convertResources(resources)
-				
+
 				expectedCPU := resource.MustParse("500m")
 				expectedMemory := resource.MustParse("512Mi")
-				
+
 				Expect(resourceList).To(HaveKeyWithValue(corev1.ResourceCPU, expectedCPU))
 				Expect(resourceList).To(HaveKeyWithValue(corev1.ResourceMemory, expectedMemory))
 			})
@@ -462,7 +462,7 @@ var _ = Describe("VolSyncMonitor Controller", func() {
 					"invalid": "not-a-quantity",
 				}
 				resourceList := reconciler.convertResources(resources)
-				
+
 				expectedCPU := resource.MustParse("500m")
 				Expect(resourceList).To(HaveKeyWithValue(corev1.ResourceCPU, expectedCPU))
 				Expect(resourceList).NotTo(HaveKey(corev1.ResourceName("invalid")))
@@ -478,13 +478,21 @@ var _ = Describe("VolSyncMonitor Controller", func() {
 						Namespace: "default",
 					},
 				}
-				
+
 				pod := &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "test-pod",
 						Namespace: "default",
 						Labels: map[string]string{
 							"job-name": "test-job",
+						},
+					},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "test-container",
+								Image: "test-image",
+							},
 						},
 					},
 					Status: corev1.PodStatus{
@@ -522,13 +530,21 @@ var _ = Describe("VolSyncMonitor Controller", func() {
 						Namespace: "default",
 					},
 				}
-				
+
 				pod := &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "test-pod-2",
 						Namespace: "default",
 						Labels: map[string]string{
 							"job-name": "test-job-2",
+						},
+					},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "test-container",
+								Image: "test-image",
+							},
 						},
 					},
 					Status: corev1.PodStatus{
@@ -566,13 +582,21 @@ var _ = Describe("VolSyncMonitor Controller", func() {
 						Namespace: "default",
 					},
 				}
-				
+
 				pod := &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      "test-pod-3",
 						Namespace: "default",
 						Labels: map[string]string{
 							"job-name": "test-job-3",
+						},
+					},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "test-container",
+								Image: "test-image",
+							},
 						},
 					},
 					Status: corev1.PodStatus{
@@ -660,11 +684,11 @@ var _ = Describe("VolSyncMonitor Controller", func() {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(volumes).To(HaveLen(1))
 				Expect(volumeMounts).To(HaveLen(1))
-				
+
 				Expect(volumes[0].Name).To(Equal("repository"))
 				Expect(volumes[0].NFS.Server).To(Equal("truenas.rafaribe.com"))
 				Expect(volumes[0].NFS.Path).To(Equal("/mnt/storage-0/volsync"))
-				
+
 				Expect(volumeMounts[0].Name).To(Equal("repository"))
 				Expect(volumeMounts[0].MountPath).To(Equal("/repository"))
 			})

@@ -14,11 +14,26 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
   - pods
   verbs:
   - get
   - list
   - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods/log
+  verbs:
+  - get
+  - list
 - apiGroups:
   - ""
   resources:
@@ -39,6 +54,32 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - homelab.rafaribe.com
+  resources:
+  - volsyncmonitors
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - homelab.rafaribe.com
+  resources:
+  - volsyncmonitors/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - homelab.rafaribe.com
+  resources:
+  - volsyncmonitors/status
+  verbs:
+  - get
+  - patch
+  - update
 - apiGroups:
   - homelab.rafaribe.com
   resources:

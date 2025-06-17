@@ -50,18 +50,6 @@ spec:
           spec:
             description: VolSyncMonitorSpec defines the desired state of VolSyncMonitor
             properties:
-              alertQuery:
-                description: AlertQuery is the query to find VolSync out-of-sync alerts
-                type: string
-              alertmanagerUrl:
-                description: AlertmanagerURL is the URL of the Alertmanager instance
-                  to query
-                type: string
-              checkInterval:
-                description: CheckInterval defines how often to check for alerts (in
-                  seconds)
-                format: int32
-                type: integer
               enabled:
                 description: Enabled controls whether the monitor is active
                 type: boolean
@@ -189,7 +177,6 @@ spec:
                 - image
                 type: object
             required:
-            - alertmanagerUrl
             - unlockJobTemplate
             type: object
           status:

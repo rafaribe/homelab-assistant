@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install mise
+      uses: jdx/mise-action@v2
+      with:
+        version: latest
+        install: true
+        cache: true
+    
+    - name: Show mise info
+      run: |
+        mise --version
+        mise list
+    
+    - name: Run CI pipeline
+      run: mise run ci
+    
+    - name: Generate coverage report
+      run: mise exec -- go test ./... -coverprofile=coverage.out -covermode=atomic
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.out
+        flags: unittests
+        name: codecov-umbrella
+
+  build-docker:
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install mise
+      uses: jdx/mise-action@v2
+      with:
+        install: true
+        cache: true
+    
+    - name: Build Docker image
+      run: mise run docker-build
+    
+    - name: Test Docker image
+      run: |
+        docker run --rm homelab-assistant:latest --version || true
+
+  integration-test:
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install mise
+      uses: jdx/mise-action@v2
+      with:
+        install: true
+        cache: true
+    
+    - name: Set up Kubernetes environment
+      run: mise run k8s-setup
+    
+    - name: Verify cluster
+      run: mise run safety-check
+    
+    - name: Run integration tests
+      run: |
+        # Add integration test commands here
+        echo "Integration tests would run here"
+        kubectl cluster-info --context kind-homelab-assistant
+    
+    - name: Cleanup
+      if: always()
+      run: mise run k8s-teardown

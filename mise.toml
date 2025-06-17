@@ -1,0 +1,9 @@
+# Alternative mise configuration
+# You can use either .mise.toml or mise.toml
+
+[tools]
+go = "1.22"
+golangci-lint = "latest"
+kind = "latest"
+kubectl = "latest"
+kustomize = "latest"

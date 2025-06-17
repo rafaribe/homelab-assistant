@@ -20,7 +20,7 @@ import (
 
 func TestSchemeSetup(t *testing.T) {
 	scheme := runtime.NewScheme()
-	
+
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(volsyncv1alpha1.AddToScheme(scheme))
 
@@ -90,7 +90,7 @@ func TestEnvironmentVariables(t *testing.T) {
 			testFunc: func(val string) interface{} { return val },
 		},
 		{
-			name:     "HEALTH_PROBE_BIND_ADDRESS", 
+			name:     "HEALTH_PROBE_BIND_ADDRESS",
 			envVar:   "HEALTH_PROBE_BIND_ADDRESS",
 			setValue: ":9091",
 			expected: ":9091",
@@ -128,7 +128,7 @@ func TestLoggerSetup(t *testing.T) {
 	devLogger := zap.New(zap.UseFlagOptions(&zap.Options{
 		Development: true,
 	}))
-	
+
 	// Check that logger is not the zero value
 	if (devLogger == logr.Logger{}) {
 		t.Error("Failed to create development logger")
@@ -138,7 +138,7 @@ func TestLoggerSetup(t *testing.T) {
 	prodLogger := zap.New(zap.UseFlagOptions(&zap.Options{
 		Development: false,
 	}))
-	
+
 	// Check that logger is not the zero value
 	if (prodLogger == logr.Logger{}) {
 		t.Error("Failed to create production logger")
@@ -152,7 +152,7 @@ func TestHealthzSetup(t *testing.T) {
 		t.Error("Readiness check should not be nil")
 	}
 
-	// Test liveness check  
+	// Test liveness check
 	livenessCheck := healthz.Ping
 	if livenessCheck == nil {
 		t.Error("Liveness check should not be nil")
@@ -266,7 +266,7 @@ func TestSignalHandling(t *testing.T) {
 
 func TestSchemeRegistration(t *testing.T) {
 	scheme := runtime.NewScheme()
-	
+
 	// Test that we can add client-go scheme
 	err := clientgoscheme.AddToScheme(scheme)
 	if err != nil {
@@ -324,8 +324,8 @@ func TestManagerCreationParameters(t *testing.T) {
 			Port: 9443,
 		}),
 		HealthProbeBindAddress:        ":8081",
-		LeaderElection:               true,
-		LeaderElectionID:             "test-election",
+		LeaderElection:                true,
+		LeaderElectionID:              "test-election",
 		LeaderElectionReleaseOnCancel: true,
 	}
 

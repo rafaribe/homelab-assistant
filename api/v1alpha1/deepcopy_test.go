@@ -6,6 +6,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	testModifiedValue = "modified"
+)
+
 func TestResourceRequirements_DeepCopy(t *testing.T) {
 	original := &ResourceRequirements{
 		Limits: map[string]string{
@@ -22,6 +26,7 @@ func TestResourceRequirements_DeepCopy(t *testing.T) {
 
 	if copied == nil {
 		t.Error("DeepCopy returned nil")
+		return
 	}
 
 	if len(copied.Limits) != len(original.Limits) {
@@ -54,6 +59,7 @@ func TestSecurityContext_DeepCopy(t *testing.T) {
 
 	if copied == nil {
 		t.Error("DeepCopy returned nil")
+		return
 	}
 
 	if copied.RunAsUser == nil || *copied.RunAsUser != *original.RunAsUser {
@@ -96,6 +102,7 @@ func TestUnlockJobTemplate_DeepCopy(t *testing.T) {
 
 	if copied == nil {
 		t.Error("DeepCopy returned nil")
+		return
 	}
 
 	if copied.Image != original.Image {
@@ -111,8 +118,8 @@ func TestUnlockJobTemplate_DeepCopy(t *testing.T) {
 	}
 
 	// Modify original to ensure deep copy
-	original.Command[0] = "modified"
-	if copied.Command[0] == "modified" {
+	original.Command[0] = testModifiedValue
+	if copied.Command[0] == testModifiedValue {
 		t.Error("DeepCopy failed: Command was not deeply copied")
 	}
 }
@@ -146,6 +153,7 @@ func TestVolSyncMonitorStatus_DeepCopy(t *testing.T) {
 
 	if copied == nil {
 		t.Error("DeepCopy returned nil")
+		return
 	}
 
 	if len(copied.ActiveUnlocks) != len(original.ActiveUnlocks) {
@@ -161,8 +169,8 @@ func TestVolSyncMonitorStatus_DeepCopy(t *testing.T) {
 	}
 
 	// Modify original to ensure deep copy
-	original.ActiveUnlocks[0].AppName = "modified"
-	if copied.ActiveUnlocks[0].AppName == "modified" {
+	original.ActiveUnlocks[0].AppName = testModifiedValue
+	if copied.ActiveUnlocks[0].AppName == testModifiedValue {
 		t.Error("DeepCopy failed: ActiveUnlocks was not deeply copied")
 	}
 }
@@ -182,6 +190,7 @@ func TestActiveUnlock_DeepCopy(t *testing.T) {
 
 	if copied == nil {
 		t.Error("DeepCopy returned nil")
+		return
 	}
 
 	if copied.AppName != original.AppName {
@@ -209,6 +218,7 @@ func TestVolSyncUnlockStatus_DeepCopy(t *testing.T) {
 
 	if copied == nil {
 		t.Error("DeepCopy returned nil")
+		return
 	}
 
 	if copied.Phase != original.Phase {
@@ -243,6 +253,7 @@ func TestVolSyncUnlockSpec_DeepCopy(t *testing.T) {
 
 	if copied == nil {
 		t.Error("DeepCopy returned nil")
+		return
 	}
 
 	if copied.AppName != original.AppName {
