@@ -117,7 +117,7 @@ jobs:
 
       - name: Publish CRDs Chart to OCI Registry
         run: |
-          # Only publish the CRDs chart - main app uses bjw-s app-template
+          # Only publish the CRDs chart - main app uses bjw-s-labs app-template
           crds_chart_dir="charts/homelab-assistant-crds"
           
           if [ -d "$crds_chart_dir" ]; then
@@ -127,20 +127,21 @@ jobs:
             chart_version=$(helm show chart "$crds_chart_dir" | grep '^version:' | cut -d' ' -f2)
             echo "CRDs chart version: $chart_version"
             
-            # OCI chart name
-            oci_ref="oci://ghcr.io/${{ github.repository_owner }}/homelab-assistant-crds"
+            # OCI registry base - Helm will append the chart name automatically
+            oci_base="oci://ghcr.io/${{ github.repository_owner }}"
             
             echo "🚀 Publishing homelab-assistant-crds:${chart_version} to OCI registry..."
             
             # Package and push directly to OCI registry
             helm package "$crds_chart_dir" --destination /tmp/
-            helm push "/tmp/homelab-assistant-crds-${chart_version}.tgz" "$oci_ref"
+            helm push "/tmp/homelab-assistant-crds-${chart_version}.tgz" "$oci_base"
             
             echo "✅ Successfully published homelab-assistant-crds:${chart_version}"
             
-            # Verify the chart was published
+            # Verify the chart was published (using the full path that Helm creates)
             echo "🔍 Verifying published chart..."
-            helm show chart "${oci_ref}" --version "${chart_version}"
+            full_oci_ref="${oci_base}/homelab-assistant-crds"
+            helm show chart "${full_oci_ref}" --version "${chart_version}"
           else
             echo "❌ CRDs chart directory not found: $crds_chart_dir"
             exit 1
