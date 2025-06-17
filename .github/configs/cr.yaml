@@ -17,4 +17,4 @@ remote: origin
 target-branch: gh-pages
 package-path: .cr-release-packages
 index-dir: .cr-index
-token: ""
+# Token will be provided via environment variable CR_TOKEN

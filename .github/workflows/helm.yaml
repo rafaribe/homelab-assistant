@@ -17,10 +17,12 @@ on:
       - "v*"
 
 permissions:
-  contents: read
-  packages: write
-  pages: write
-  id-token: write
+  contents: write      # Required for creating GitHub releases and pushing to gh-pages
+  packages: write      # Required for OCI registry
+  pages: write         # Required for GitHub Pages
+  id-token: write      # Required for OIDC
+  pull-requests: write # Required for chart-releaser PRs (if needed)
+  actions: read        # Required for downloading artifacts
 
 jobs:
   chart-test:
@@ -164,6 +166,13 @@ jobs:
               fi
             fi
           done
+
+      - name: Debug GitHub token permissions
+        run: |
+          echo "Checking GitHub token permissions..."
+          curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+               -H "Accept: application/vnd.github.v3+json" \
+               https://api.github.com/repos/${{ github.repository }} | jq '.permissions // "No permissions info"'
 
       - name: Run chart-releaser
         uses: helm/chart-releaser-action@v1.6.0
