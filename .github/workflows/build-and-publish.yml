@@ -247,9 +247,23 @@ jobs:
       - name: Create manifest list and push
         working-directory: /tmp/digests
         run: |
+          echo "📋 Available tags from metadata:"
+          jq -r '.target."docker-metadata-action".tags[]' ${{ runner.temp }}/docker-metadata-action-bake.json
+          echo ""
+          echo "🚀 Creating manifest list..."
           docker buildx imagetools create $(jq -cr '.target."docker-metadata-action".tags | map("-t " + .) | join(" ")' ${{ runner.temp }}/docker-metadata-action-bake.json) \
             $(printf 'ghcr.io/${{ github.repository_owner }}/homelab-assistant@sha256:%s ' *)
 
       - name: Inspect image
         run: |
-          docker buildx imagetools inspect ghcr.io/${{ github.repository_owner }}/homelab-assistant:${{ github.ref_name }}
+          # Get the first tag from the metadata to inspect
+          FIRST_TAG=$(jq -r '.target."docker-metadata-action".tags[0]' ${{ runner.temp }}/docker-metadata-action-bake.json)
+          echo "🔍 Inspecting image: $FIRST_TAG"
+          docker buildx imagetools inspect "$FIRST_TAG"
+          
+          # Also try to inspect the latest tag if we're on main
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo ""
+            echo "🔍 Also inspecting latest tag:"
+            docker buildx imagetools inspect "ghcr.io/${{ github.repository_owner }}/homelab-assistant:latest"
+          fi
