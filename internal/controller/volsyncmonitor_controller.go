@@ -455,19 +455,8 @@ func (r *VolSyncMonitorReconciler) createUnlockJobForFailedJob(ctx context.Conte
 		return fmt.Errorf("failed to create job: %w", err)
 	}
 
-	// Update monitor status
-	activeUnlock := volsyncv1alpha1.ActiveUnlock{
-		AppName:          appName,
-		Namespace:        failedJob.Namespace,
-		ObjectName:       objectName,
-		JobName:          jobName,
-		StartTime:        metav1.Now(),
-		AlertFingerprint: failedJob.Name, // Use failed job name as fingerprint
-	}
-	monitor.Status.ActiveUnlocks = append(monitor.Status.ActiveUnlocks, activeUnlock)
-	monitor.Status.TotalUnlocksCreated++
-
-	return r.Status().Update(ctx, monitor)
+	logger.Info("Successfully created unlock job", "jobName", jobName, "appName", appName, "objectName", objectName)
+	return nil
 }
 
 func (r *VolSyncMonitorReconciler) buildResticEnvVars(ctx context.Context, appName, namespace, objectName string) ([]corev1.EnvVar, error) {

@@ -1,5 +1,5 @@
 # Default values for homelab-assistant-crds
 # This chart only installs CRDs and has no configurable values
 
-# CRDs are installed as templates to ensure proper lifecycle management
+# -- CRDs are installed as templates to ensure proper lifecycle management
 installCRDs: true

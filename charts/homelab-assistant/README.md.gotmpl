@@ -1,0 +1,119 @@
+{{ template "chart.header" . }}
+
+{{ template "chart.description" . }}
+
+{{ template "chart.versionBadge" . }}{{ template "chart.typeBadge" . }}{{ template "chart.appVersionBadge" . }}
+
+## Prerequisites
+
+- Kubernetes 1.25+
+- Helm 3.8+
+- VolSync operator (for VolSync Monitor controller)
+
+## Installation
+
+### Install CRDs First
+
+```bash
+helm install homelab-assistant-crds \
+  oci://ghcr.io/rafaribe/homelab-assistant-crds \
+  --version {{ template "chart.version" . }} \
+  --namespace homelab-assistant-system \
+  --create-namespace
+```
+
+### Install Controllers
+
+```bash
+helm install homelab-assistant \
+  oci://ghcr.io/rafaribe/homelab-assistant \
+  --version {{ template "chart.version" . }} \
+  --namespace homelab-assistant-system
+```
+
+## Configuration
+
+{{ template "chart.valuesSection" . }}
+
+## Examples
+
+### Basic Installation
+
+```yaml
+# values.yaml
+controller:
+  image:
+    tag: "v{{ template "chart.appVersion" . }}"
+
+volsyncMonitor:
+  enabled: true
+  maxConcurrentUnlocks: 5
+  
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    additionalLabels:
+      release: prometheus
+```
+
+### Minimal Installation
+
+```yaml
+# values.yaml
+volsyncMonitor:
+  enabled: false
+
+metrics:
+  enabled: false
+```
+
+### Custom Lock Error Patterns
+
+```yaml
+# values.yaml
+volsyncMonitor:
+  enabled: true
+  lockErrorPatterns:
+    - "repository is already locked"
+    - "unable to create lock"
+    - "custom error pattern"
+```
+
+## Uninstalling
+
+```bash
+# Remove the controllers
+helm uninstall homelab-assistant -n homelab-assistant-system
+
+# Remove the CRDs (optional, will remove all custom resources)
+helm uninstall homelab-assistant-crds -n homelab-assistant-system
+```
+
+## Development
+
+### Running Tests
+
+```bash
+# Install helm unittest plugin
+helm plugin install https://github.com/helm-unittest/helm-unittest.git
+
+# Run tests
+helm unittest charts/homelab-assistant
+```
+
+### Linting
+
+```bash
+# Install chart-testing
+pip install chart-testing
+
+# Lint charts
+ct lint --config .github/ct.yaml
+```
+
+{{ template "chart.maintainersSection" . }}
+
+{{ template "chart.sourcesSection" . }}
+
+{{ template "chart.requirementsSection" . }}

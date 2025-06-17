@@ -113,12 +113,7 @@ vet: ## Run go vet against code.
 
 .PHONY: test
 test: manifests generate fmt vet envtest ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
-
-# Utilize Kind or modify the e2e tests to load the image locally, enabling compatibility with other vendors.
-.PHONY: test-e2e  # Run the e2e tests against a Kind k8s instance that is spun up.
-test-e2e:
-	go test ./test/e2e/ -v -ginkgo.v
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $(shell go list ./... | grep -v /e2e) -coverprofile cover.out
 	
 GOLANGCI_LINT = $(shell pwd)/bin/golangci-lint
 GOLANGCI_LINT_VERSION ?= v1.54.2
@@ -223,9 +218,16 @@ chart-lint: ## Lint helm charts
 .PHONY: chart-docs
 chart-docs: ## Generate chart documentation
 	@echo "Installing helm-docs..."
-	@which helm-docs > /dev/null || (echo "Please install helm-docs: https://github.com/norwoodj/helm-docs" && exit 1)
+	@if ! command -v helm-docs >/dev/null 2>&1; then \
+		echo "Installing helm-docs..."; \
+		cd /tmp && \
+		wget -q https://github.com/norwoodj/helm-docs/releases/download/v1.14.2/helm-docs_1.14.2_Linux_x86_64.tar.gz && \
+		tar -xzf helm-docs_1.14.2_Linux_x86_64.tar.gz && \
+		sudo mv helm-docs /usr/local/bin/helm-docs && \
+		chmod +x /usr/local/bin/helm-docs; \
+	fi
 	@echo "Generating chart documentation..."
-	@helm-docs --chart-search-root=charts
+	@cd charts && helm-docs --chart-search-root=.
 
 .PHONY: chart-package
 chart-package: ## Package helm charts
@@ -235,7 +237,15 @@ chart-package: ## Package helm charts
 	@helm package charts/homelab-assistant-crds --destination dist/
 
 .PHONY: chart-install-local
-chart-install-local: chart-package ## Install charts locally for testing
+chart-install-local: chart-package ## Install charts locally for testing (WARNING: Uses current kubeconfig context)
+	@echo "WARNING: This will install to your current Kubernetes context!"
+	@echo "Current context: $$(kubectl config current-context 2>/dev/null || echo 'No context set')"
+	@read -p "Are you sure you want to continue? [y/N] " -n 1 -r; \
+	echo; \
+	if [[ ! $$REPLY =~ ^[Yy]$$ ]]; then \
+		echo "Installation cancelled."; \
+		exit 1; \
+	fi
 	@echo "Installing CRDs..."
 	@helm upgrade --install homelab-assistant-crds dist/homelab-assistant-crds-*.tgz \
 		--namespace homelab-assistant-system --create-namespace
@@ -244,7 +254,15 @@ chart-install-local: chart-package ## Install charts locally for testing
 		--namespace homelab-assistant-system
 
 .PHONY: chart-uninstall-local
-chart-uninstall-local: ## Uninstall local charts
+chart-uninstall-local: ## Uninstall local charts (WARNING: Uses current kubeconfig context)
+	@echo "WARNING: This will uninstall from your current Kubernetes context!"
+	@echo "Current context: $$(kubectl config current-context 2>/dev/null || echo 'No context set')"
+	@read -p "Are you sure you want to continue? [y/N] " -n 1 -r; \
+	echo; \
+	if [[ ! $$REPLY =~ ^[Yy]$$ ]]; then \
+		echo "Uninstallation cancelled."; \
+		exit 1; \
+	fi
 	@echo "Uninstalling controllers..."
 	@helm uninstall homelab-assistant -n homelab-assistant-system || true
 	@echo "Uninstalling CRDs..."

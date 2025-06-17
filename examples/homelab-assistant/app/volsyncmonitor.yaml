@@ -5,9 +5,9 @@ metadata:
   name: main-monitor
 spec:
   enabled: true
-  maxConcurrentUnlocks: 3
+  maxConcurrentUnlocks: 1
   ttlSecondsAfterFinished: 3600
-  
+
   lockErrorPatterns:
     - "repository is already locked"
     - "unable to create lock"
@@ -17,12 +17,12 @@ spec:
     - "repository.*locked.*by.*another.*process"
     - "timeout.*waiting.*for.*lock"
     - "could not create lock"
-  
+
   unlockJobTemplate:
     image: "quay.io/backube/volsync:0.13.0-rc.2"
     command: ["restic"]
     args: ["unlock", "--remove-all"]
-    
+
     resources:
       limits:
         cpu: "500m"
@@ -30,7 +30,7 @@ spec:
       requests:
         cpu: "100m"
         memory: "128Mi"
-    
+
     securityContext:
       runAsUser: 1000
       runAsGroup: 1000
