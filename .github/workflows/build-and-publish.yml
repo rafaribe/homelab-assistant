@@ -5,7 +5,21 @@ name: Build and Publish
 on:
   push:
     branches: ["main", "develop"]
-    paths: ["**"]
+    tags: ["v*"]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".github/workflows/ci.yml"
+      - ".github/workflows/schemas.yml"
+  pull_request:
+    branches: ["main", "develop"]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".github/workflows/ci.yml"
+      - ".github/workflows/schemas.yml"
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       release:
@@ -13,6 +27,15 @@ on:
         description: Release
         required: false
         default: false
+      platforms:
+        type: choice
+        description: Platforms to build
+        required: false
+        default: "all"
+        options:
+          - "all"
+          - "linux/amd64"
+          - "linux/arm64"
 
 permissions:
   contents: read
@@ -26,6 +49,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       platforms: ${{ steps.platforms.outputs.platforms }}
+      should-push: ${{ steps.push-decision.outputs.should-push }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,7 +59,28 @@ jobs:
       - name: Set Platforms
         id: platforms
         run: |
-          echo 'platforms=["linux/amd64", "linux/arm64"]' >> $GITHUB_OUTPUT
+          if [[ "${{ inputs.platforms }}" == "linux/amd64" ]]; then
+            echo 'platforms=["linux/amd64"]' >> $GITHUB_OUTPUT
+          elif [[ "${{ inputs.platforms }}" == "linux/arm64" ]]; then
+            echo 'platforms=["linux/arm64"]' >> $GITHUB_OUTPUT
+          else
+            echo 'platforms=["linux/amd64", "linux/arm64"]' >> $GITHUB_OUTPUT
+          fi
+
+      - name: Decide if we should push
+        id: push-decision
+        run: |
+          # Push on: main/develop branch pushes, tags, releases, or manual release
+          if [[ "${{ github.event_name }}" == "push" && ("${{ github.ref_name }}" == "main" || "${{ github.ref_name }}" == "develop") ]] || \
+             [[ "${{ github.event_name }}" == "push" && "${{ github.ref_type }}" == "tag" ]] || \
+             [[ "${{ github.event_name }}" == "release" ]] || \
+             [[ "${{ inputs.release }}" == "true" ]]; then
+            echo "should-push=true" >> $GITHUB_OUTPUT
+            echo "Will push images to registry"
+          else
+            echo "should-push=false" >> $GITHUB_OUTPUT
+            echo "Will only build images (PR or non-main branch)"
+          fi
 
       - name: Get Application Versions
         id: app-versions
@@ -170,12 +215,12 @@ jobs:
           set: |
             *.args.VENDOR=${{ github.repository_owner }}
             *.cache-from=${{ format('type=registry,ref=ghcr.io/{0}/build_cache:homelab-assistant-{1},mode=max', github.repository_owner, steps.target.outputs.arch) }}
-            *.cache-to=${{ (github.event_name == 'push' || inputs.release) && format('type=registry,ref=ghcr.io/{0}/build_cache:homelab-assistant-{1},mode=max,compression=zstd,force-compression=true', github.repository_owner, steps.target.outputs.arch) || '' }}
+            *.cache-to=${{ format('type=registry,ref=ghcr.io/{0}/build_cache:homelab-assistant-{1},mode=max,compression=zstd,force-compression=true', github.repository_owner, steps.target.outputs.arch) }}
             *.labels.org.opencontainers.image.title=homelab-assistant
             *.labels.org.opencontainers.image.url=https://ghcr.io/${{ github.repository }}
             *.labels.org.opencontainers.image.revision=${{ github.sha }}
             *.labels.org.opencontainers.image.vendor=${{ github.repository_owner }}
-            ${{ (github.event_name == 'push' || inputs.release) && format('*.output=type=image,name=ghcr.io/{0}/homelab-assistant,push-by-digest=true,name-canonical=true,push=true', github.repository_owner) || '*.output=type=docker,name=homelab-assistant:test' }}
+            *.output=type=docker,name=homelab-assistant:test
             *.platform=${{ matrix.platform }}
             *.tags=
           source: .
@@ -183,19 +228,36 @@ jobs:
           workdir: .
 
       - name: Run Application Tests
-        if: ${{ ! (github.event_name == 'push' || inputs.release) }}
         uses: ./.github/workflows/test-image.yml
         with:
           image: homelab-assistant:test
 
-      - if: ${{ github.event_name == 'push' || inputs.release }}
+      - name: Push to Registry
+        if: ${{ needs.plan.outputs.should-push == 'true' }}
+        uses: docker/bake-action@v5
+        id: push
+        with:
+          files: |
+            ./docker-bake.hcl
+            cwd://${{ runner.temp }}/docker-metadata-action-bake.json
+          set: |
+            *.args.VENDOR=${{ github.repository_owner }}
+            *.cache-from=${{ format('type=registry,ref=ghcr.io/{0}/build_cache:homelab-assistant-{1},mode=max', github.repository_owner, steps.target.outputs.arch) }}
+            *.output=type=image,name=ghcr.io/${{ github.repository_owner }}/homelab-assistant,push-by-digest=true,name-canonical=true,push=true
+            *.platform=${{ matrix.platform }}
+            *.tags=
+          source: .
+          targets: image
+          workdir: .
+
+      - if: ${{ needs.plan.outputs.should-push == 'true' }}
         name: Export digest
         run: |
           mkdir -p /tmp/digests
-          digest="${{ fromJSON(steps.bake.outputs.metadata).image['containerimage.digest'] }}"
+          digest="${{ fromJSON(steps.push.outputs.metadata).image['containerimage.digest'] }}"
           touch "/tmp/digests/${digest#sha256:}"
 
-      - if: ${{ github.event_name == 'push' || inputs.release }}
+      - if: ${{ needs.plan.outputs.should-push == 'true' }}
         name: Upload digest
         uses: actions/upload-artifact@v4
         with:
@@ -205,7 +267,7 @@ jobs:
           retention-days: 1
 
   merge:
-    if: ${{ github.event_name == 'push' || inputs.release }}
+    if: ${{ needs.plan.outputs.should-push == 'true' }}
     name: Merge
     runs-on: ubuntu-latest
     needs: ["plan", "build"]
@@ -233,10 +295,45 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
+      - name: Debug metadata file
+        run: |
+          echo "=== Listing /tmp contents ==="
+          ls -la /tmp/
+          echo "=== Checking for bake file ==="
+          find /tmp -name "*bake*" -type f
+          echo "=== Content of bake file ==="
+          if [ -f /tmp/docker-metadata-action-bake.json ]; then
+            cat /tmp/docker-metadata-action-bake.json | jq .
+          else
+            echo "Bake file not found at expected location"
+          fi
+
       - name: Create manifest list and push
         working-directory: /tmp/digests
         run: |
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' < /tmp/docker-metadata-action-bake.json) \
+          # Find the actual bake file
+          BAKE_FILE=$(find /tmp -name "*bake*.json" -type f | head -1)
+          if [ -z "$BAKE_FILE" ]; then
+            echo "ERROR: No bake file found"
+            exit 1
+          fi
+          
+          echo "Using bake file: $BAKE_FILE"
+          
+          # Extract tags from the bake file
+          TAGS=$(jq -r '.target."docker-metadata-action".tags[]? // empty' "$BAKE_FILE" | sed 's/^/-t /' | tr '\n' ' ')
+          
+          if [ -z "$TAGS" ]; then
+            echo "ERROR: No tags found in bake file"
+            echo "Bake file content:"
+            cat "$BAKE_FILE"
+            exit 1
+          fi
+          
+          echo "Tags to create: $TAGS"
+          
+          # Create the manifest
+          docker buildx imagetools create $TAGS \
             $(printf 'ghcr.io/${{ github.repository_owner }}/homelab-assistant@sha256:%s ' *)
 
       - name: Inspect image
