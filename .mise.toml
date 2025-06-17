@@ -73,10 +73,6 @@ run = [
     "go clean -cache",
 ]
 
-[tasks.docker-build]
-description = "Build Docker image"
-run = "docker build -t homelab-assistant:latest ."
-
 [tasks.kind-create]
 description = "Create kind cluster for testing"
 run = [
@@ -132,11 +128,24 @@ run = [
 
 [tasks.ci-full]
 description = "Full CI pipeline with extra checks"
-depends = ["ci-info", "ci", "docker-build"]
+depends = ["ci-info", "ci"]
 
 [tasks.k8s-setup]
 description = "Complete Kubernetes development setup"
-depends = ["kind-create", "install-crds"]
+run = [
+    "echo '🚀 Setting up Kubernetes development environment...'",
+    "# Step 1: Create kind cluster",
+    "kind create cluster --name ${KIND_CLUSTER_NAME}",
+    "kubectl cluster-info --context kind-${KIND_CLUSTER_NAME}",
+    "# Step 2: Wait for cluster to be ready",
+    "echo '⏳ Waiting for cluster to be ready...'",
+    "sleep 3",
+    "# Step 3: Safety check",
+    "./scripts/k8s-safety-check.sh",
+    "# Step 4: Install CRDs",
+    "kubectl apply -f config/crd/bases/",
+    "echo '✅ Kubernetes development environment ready!'",
+]
 
 [tasks.k8s-teardown]
 description = "Clean up Kubernetes development environment"
