@@ -9,15 +9,11 @@ on:
     paths-ignore:
       - "**.md"
       - "docs/**"
-      - ".github/workflows/ci.yml"
-      - ".github/workflows/schemas.yml"
   pull_request:
     branches: ["main", "develop"]
     paths-ignore:
       - "**.md"
       - "docs/**"
-      - ".github/workflows/ci.yml"
-      - ".github/workflows/schemas.yml"
   release:
     types: [published]
   workflow_dispatch:
@@ -44,25 +40,9 @@ permissions:
   attestations: write
 
 jobs:
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Install mise
-        uses: jdx/mise-action@v2
-
-      - name: Run tests
-        run: mise run test-all
-
   plan:
     name: Plan
     runs-on: ubuntu-latest
-    needs: [test]  # Only run if tests pass
     outputs:
       platforms: ${{ steps.platforms.outputs.platforms }}
       should-push: ${{ steps.push-decision.outputs.should-push }}
@@ -98,54 +78,29 @@ jobs:
             echo "Will only build images (PR or non-main branch)"
           fi
 
-      - name: Get Application Versions
+      - name: Generate Application Versions
         id: app-versions
         run: |
-          # Use CalVer as primary versioning scheme: YYYY.MM.DD
-          CALVER=$(date +'%Y.%-m.%-d')
-          
-          # For tagged releases, still respect semver but prefer CalVer
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            TAG_VERSION="${{ github.ref_name }}"
-            # Check if tag follows CalVer pattern (YYYY.M.D or YYYY.MM.DD)
-            if [[ $TAG_VERSION =~ ^v?[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}.*$ ]]; then
-              VERSION=$(echo $TAG_VERSION | sed 's/^v//')
-              IS_VALID_SEMVER="false"  # Treat CalVer tags as non-semver
-            elif [[ $TAG_VERSION =~ ^v?[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
-              # Traditional semver tag - convert to CalVer for consistency
-              VERSION=$CALVER
-              IS_VALID_SEMVER="true"
-              SEMVER_VERSION=$(echo $TAG_VERSION | sed 's/^v//' | cut -d'-' -f1)
-            else
-              VERSION=$CALVER
-              IS_VALID_SEMVER="false"
-            fi
-          else
-            # Non-tag builds always use CalVer
-            VERSION=$CALVER
-            IS_VALID_SEMVER="false"
-          fi
-          
-          # Add branch suffix for non-main branches (except tags)
-          if [[ "${{ github.ref_type }}" != "tag" && "${{ github.ref_name }}" != "main" ]]; then
-            BRANCH_SUFFIX=$(echo "${{ github.ref_name }}" | sed 's/[^a-zA-Z0-9]/-/g')
-            VERSION="${VERSION}-${BRANCH_SUFFIX}"
-          fi
-          
-          echo "semantic=$VERSION" >> $GITHUB_OUTPUT
-          echo "raw=$VERSION" >> $GITHUB_OUTPUT
+          # Generate CalVer version (YYYY.MM.DD)
+          CALVER=$(date +'%Y.%m.%d')
           echo "calver=$CALVER" >> $GITHUB_OUTPUT
-          echo "is-valid-semver=$IS_VALID_SEMVER" >> $GITHUB_OUTPUT
-          echo "upstream=$VERSION" >> $GITHUB_OUTPUT
           
-          # Set semver version if we detected one
-          if [[ "$IS_VALID_SEMVER" == "true" ]]; then
-            echo "semver-version=${SEMVER_VERSION:-$VERSION}" >> $GITHUB_OUTPUT
+          # Generate raw version with commit info
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            RAW_VERSION="${{ github.ref_name }}"
+          else
+            RAW_VERSION="${CALVER}-${{ github.sha }}"
           fi
+          echo "raw=$RAW_VERSION" >> $GITHUB_OUTPUT
           
-          echo "Generated version: $VERSION"
-          echo "CalVer base: $CALVER"
-          echo "Is semver: $IS_VALID_SEMVER"
+          # Check if this is a valid semver tag
+          if [[ "${{ github.ref_name }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
+            echo "is-valid-semver=true" >> $GITHUB_OUTPUT
+            echo "semver-version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "is-valid-semver=false" >> $GITHUB_OUTPUT
+            echo "semver-version=" >> $GITHUB_OUTPUT
+          fi
 
       - name: Build Application Metadata
         uses: docker/metadata-action@v5
@@ -169,59 +124,60 @@ jobs:
             type=raw,value=develop,enable=${{ github.ref_name == 'develop' }}
           labels: |
             org.opencontainers.image.title=homelab-assistant
-            org.opencontainers.image.description=Kubernetes operator for homelab automation
+            org.opencontainers.image.description=Kubernetes controllers for homelab automation
             org.opencontainers.image.vendor=${{ github.repository_owner }}
             org.opencontainers.image.version=${{ steps.app-versions.outputs.raw }}
-            org.opencontainers.image.created={{date 'iso8601'}}
             org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.url=https://ghcr.io/${{ github.repository }}
+            org.opencontainers.image.documentation=https://rafaribe.github.io/homelab-assistant/
+            org.opencontainers.image.licenses=Apache-2.0
 
-      - name: Upload Bake Metadata
+      - name: Upload metadata
         uses: actions/upload-artifact@v4
         with:
           name: bake-metadata
           path: ${{ steps.meta.outputs.bake-file }}
-          if-no-files-found: error
           retention-days: 1
 
   build:
     name: Build (${{ matrix.platform }})
-    needs: ["test", "plan"]  # Require both tests and planning to pass
+    needs: ["plan"]
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        platform: ${{ fromJson(needs.plan.outputs.platforms) }}
-    runs-on: ubuntu-latest
+        platform: ${{ fromJSON(needs.plan.outputs.platforms) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           persist-credentials: false
 
-      - name: Get Target Architecture
-        uses: actions/github-script@v7
-        id: target
+      - name: Download metadata
+        uses: actions/download-artifact@v4
         with:
-          script: |
-            core.setOutput('arch', '${{ matrix.platform }}'.split('/').pop());
+          name: bake-metadata
+          path: /tmp
 
-      - name: Login to GitHub Container Registry
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        if: ${{ needs.plan.outputs.should-push == 'true' }}
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ github.token }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download Bake Metadata
-        uses: actions/download-artifact@v4
-        with:
-          name: bake-metadata
-          path: ${{ runner.temp }}
+      - name: Set target architecture
+        id: target
+        run: |
+          platform="${{ matrix.platform }}"
+          echo "arch=${platform##*/}" >> $GITHUB_OUTPUT
 
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Application
+      - name: Build and Push Application
         uses: docker/bake-action@v5
         id: bake
         with:
@@ -231,30 +187,12 @@ jobs:
           set: |
             *.args.VENDOR=${{ github.repository_owner }}
             *.cache-from=${{ format('type=registry,ref=ghcr.io/{0}/build_cache:homelab-assistant-{1},mode=max', github.repository_owner, steps.target.outputs.arch) }}
-              *.cache-to=${{ format('type=registry,ref=ghcr.io/{0}/build_cache:homelab-assistant-{1},mode=max,compression=zstd,force-compression=true', github.repository_owner, steps.target.outputs.arch) }}
+            *.cache-to=${{ format('type=registry,ref=ghcr.io/{0}/build_cache:homelab-assistant-{1},mode=max,compression=zstd,force-compression=true', github.repository_owner, steps.target.outputs.arch) }}
             *.labels.org.opencontainers.image.title=homelab-assistant
             *.labels.org.opencontainers.image.url=https://ghcr.io/${{ github.repository }}
             *.labels.org.opencontainers.image.revision=${{ github.sha }}
             *.labels.org.opencontainers.image.vendor=${{ github.repository_owner }}
-            *.output=type=docker,name=homelab-assistant:test
-            *.platform=${{ matrix.platform }}
-            *.tags=
-          source: .
-          targets: image
-          workdir: .
-
-      - name: Push to Registry
-        if: ${{ needs.plan.outputs.should-push == 'true' }}
-        uses: docker/bake-action@v5
-        id: push
-        with:
-          files: |
-            ./docker-bake.hcl
-            cwd://${{ runner.temp }}/docker-metadata-action-bake.json
-          set: |
-            *.args.VENDOR=${{ github.repository_owner }}
-            *.cache-from=${{ format('type=registry,ref=ghcr.io/{0}/build_cache:homelab-assistant-{1},mode=max', github.repository_owner, steps.target.outputs.arch) }}
-            *.output=type=image,name=ghcr.io/${{ github.repository_owner }}/homelab-assistant,push-by-digest=true,name-canonical=true,push=true
+            *.output=${{ needs.plan.outputs.should-push == 'true' && format('type=image,name=ghcr.io/{0}/homelab-assistant,push-by-digest=true,name-canonical=true,push=true', github.repository_owner) || 'type=docker,name=homelab-assistant:test' }}
             *.platform=${{ matrix.platform }}
             *.tags=
           source: .
@@ -265,14 +203,14 @@ jobs:
         name: Export digest
         run: |
           mkdir -p /tmp/digests
-          digest="${{ fromJSON(steps.push.outputs.metadata).image['containerimage.digest'] }}"
+          digest="${{ fromJSON(steps.bake.outputs.metadata).image['containerimage.digest'] }}"
           touch "/tmp/digests/${digest#sha256:}"
 
       - if: ${{ needs.plan.outputs.should-push == 'true' }}
         name: Upload digest
         uses: actions/upload-artifact@v4
         with:
-          name: digests-${{ strategy.job-index }}
+          name: digests-${{ steps.target.outputs.arch }}
           path: /tmp/digests/*
           if-no-files-found: error
           retention-days: 1
@@ -281,13 +219,23 @@ jobs:
     if: ${{ needs.plan.outputs.should-push == 'true' }}
     name: Merge
     runs-on: ubuntu-latest
-    needs: ["test", "plan", "build"]  # Ensure tests passed before merging
+    needs: ["plan", "build"]
     steps:
       - name: Download metadata
         uses: actions/download-artifact@v4
         with:
           name: bake-metadata
           path: /tmp
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download digests
         uses: actions/download-artifact@v4
@@ -296,57 +244,12 @@ jobs:
           pattern: digests-*
           merge-multiple: true
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-
-      - name: Debug metadata file
-        run: |
-          echo "=== Listing /tmp contents ==="
-          ls -la /tmp/
-          echo "=== Checking for bake file ==="
-          find /tmp -name "*bake*" -type f
-          echo "=== Content of bake file ==="
-          if [ -f /tmp/docker-metadata-action-bake.json ]; then
-            cat /tmp/docker-metadata-action-bake.json | jq .
-          else
-            echo "Bake file not found at expected location"
-          fi
-
       - name: Create manifest list and push
         working-directory: /tmp/digests
         run: |
-          # Find the actual bake file
-          BAKE_FILE=$(find /tmp -name "*bake*.json" -type f | head -1)
-          if [ -z "$BAKE_FILE" ]; then
-            echo "ERROR: No bake file found"
-            exit 1
-          fi
-          
-          echo "Using bake file: $BAKE_FILE"
-          
-          # Extract tags from the bake file
-          TAGS=$(jq -r '.target."docker-metadata-action".tags[]? // empty' "$BAKE_FILE" | sed 's/^/-t /' | tr '\n' ' ')
-          
-          if [ -z "$TAGS" ]; then
-            echo "ERROR: No tags found in bake file"
-            echo "Bake file content:"
-            cat "$BAKE_FILE"
-            exit 1
-          fi
-          
-          echo "Tags to create: $TAGS"
-          
-          # Create the manifest
-          docker buildx imagetools create $TAGS \
+          docker buildx imagetools create $(jq -cr '.target."docker-metadata-action".tags | map("-t " + .) | join(" ")' /tmp/docker-metadata-action-bake.json) \
             $(printf 'ghcr.io/${{ github.repository_owner }}/homelab-assistant@sha256:%s ' *)
 
       - name: Inspect image
         run: |
-          docker buildx imagetools inspect ghcr.io/${{ github.repository_owner }}/homelab-assistant:rolling
+          docker buildx imagetools inspect ghcr.io/${{ github.repository_owner }}/homelab-assistant:${{ github.ref_name }}

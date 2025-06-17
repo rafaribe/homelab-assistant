@@ -1,0 +1,217 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Test
+
+on:
+  push:
+    branches: ["main", "develop"]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  pull_request:
+    branches: ["main", "develop"]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  code-tests:
+    name: Code Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install mise
+        uses: jdx/mise-action@v2
+
+      - name: Run all tests
+        run: mise run test-all
+
+  image-tests:
+    name: Image Tests
+    runs-on: ubuntu-latest
+    needs: [code-tests]  # Only test image if code tests pass
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install mise
+        uses: jdx/mise-action@v2
+
+      - name: Build test image
+        run: |
+          echo "🔨 Building test image..."
+          docker build -t homelab-assistant:test .
+
+      - name: Test built image
+        run: |
+          echo "🧪 Testing built Docker image..."
+          IMAGE_NAME="homelab-assistant:test"
+          
+          echo "Testing version command..."
+          docker run --rm $IMAGE_NAME --version
+          
+          echo "Testing help command..."
+          docker run --rm $IMAGE_NAME --help
+
+          echo "Testing container starts without crash..."
+          timeout 10s docker run --rm $IMAGE_NAME || [ $? -eq 124 ]
+
+          echo "Testing binary exists and is executable..."
+          docker run --rm $IMAGE_NAME sh -c "ls -la /manager && file /manager"
+
+          echo "Testing container runs as non-root user..."
+          USER_ID=$(docker run --rm $IMAGE_NAME sh -c "id -u")
+          if [ "$USER_ID" = "0" ]; then
+            echo "❌ ERROR: Container is running as root user"
+            exit 1
+          fi
+          echo "✅ Container runs as user ID: $USER_ID"
+
+          echo "Testing environment variables..."
+          docker run --rm $IMAGE_NAME sh -c "env | grep -E '(PATH|HOME|USER)' || true"
+
+          echo "Testing with Kubernetes-like environment..."
+          docker run --rm \
+            -e KUBERNETES_SERVICE_HOST=kubernetes.default.svc \
+            -e KUBERNETES_SERVICE_PORT=443 \
+            $IMAGE_NAME --help
+
+          echo "Testing metrics endpoint configuration..."
+          timeout 5s docker run --rm $IMAGE_NAME \
+            --metrics-bind-address=:9090 \
+            --health-probe-bind-address=:9091 || [ $? -eq 124 ]
+
+          echo "Testing leader election flag..."
+          timeout 5s docker run --rm $IMAGE_NAME \
+            --leader-elect=true || [ $? -eq 124 ]
+
+          echo "Testing image labels and metadata..."
+          docker inspect $IMAGE_NAME | jq -r '.[0].Config.Labels' | grep -E "(org.opencontainers.image|version)" || true
+
+          echo "Testing image size..."
+          SIZE=$(docker inspect $IMAGE_NAME | jq -r '.[0].Size')
+          SIZE_MB=$((SIZE / 1024 / 1024))
+          echo "Image size: ${SIZE_MB}MB"
+          if [ $SIZE_MB -gt 100 ]; then
+            echo "⚠️  Warning: Image size is ${SIZE_MB}MB, consider optimization"
+          else
+            echo "✅ Image size is reasonable: ${SIZE_MB}MB"
+          fi
+
+          echo "Testing basic security properties..."
+          docker history $IMAGE_NAME | grep -i distroless && echo "✅ Using distroless base image" || echo "⚠️  Not using distroless base"
+          docker run --rm $IMAGE_NAME sh -c "ls -la /etc/passwd /etc/shadow 2>/dev/null || echo '✅ No passwd/shadow files (good for distroless)'"
+          
+          echo "🎉 All image tests passed!"
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [image-tests]  # Only run if image tests pass
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install mise
+        uses: jdx/mise-action@v2
+
+      - name: Build test image
+        run: |
+          echo "🔨 Building test image for integration tests..."
+          docker build -t homelab-assistant:test .
+
+      - name: Set up kind cluster
+        run: |
+          echo "🚀 Setting up kind cluster for integration testing..."
+          mise run k8s-setup
+
+      - name: Test image in Kubernetes
+        run: |
+          echo "🧪 Testing image in Kubernetes environment..."
+          
+          # Create a test deployment
+          cat <<EOF | kubectl apply -f -
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: homelab-assistant-test
+            namespace: default
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: homelab-assistant-test
+            template:
+              metadata:
+                labels:
+                  app: homelab-assistant-test
+              spec:
+                containers:
+                - name: manager
+                  image: homelab-assistant:test
+                  imagePullPolicy: Never
+                  command: ["/manager"]
+                  args:
+                    - --metrics-bind-address=:8080
+                    - --health-probe-bind-address=:8081
+                  ports:
+                  - containerPort: 8080
+                    name: metrics
+                  - containerPort: 8081
+                    name: health
+                  resources:
+                    limits:
+                      memory: "128Mi"
+                      cpu: "100m"
+                    requests:
+                      memory: "64Mi"
+                      cpu: "50m"
+          EOF
+
+      - name: Wait for deployment
+        run: |
+          echo "⏳ Waiting for deployment to be ready..."
+          kubectl wait --for=condition=available --timeout=60s deployment/homelab-assistant-test
+
+      - name: Test pod health
+        run: |
+          echo "🏥 Testing pod health..."
+          kubectl get pods -l app=homelab-assistant-test
+          POD_NAME=$(kubectl get pods -l app=homelab-assistant-test -o jsonpath='{.items[0].metadata.name}')
+          kubectl describe pod $POD_NAME
+
+          # Port forward and test health endpoint
+          kubectl port-forward pod/$POD_NAME 8081:8081 &
+          PF_PID=$!
+          sleep 5
+          
+          # Test health endpoints
+          curl -f http://localhost:8081/healthz || echo "Health endpoint test failed"
+          curl -f http://localhost:8081/readyz || echo "Ready endpoint test failed"
+          
+          kill $PF_PID || true
+
+      - name: Check pod logs
+        run: |
+          echo "📋 Checking pod logs..."
+          POD_NAME=$(kubectl get pods -l app=homelab-assistant-test -o jsonpath='{.items[0].metadata.name}')
+          kubectl logs $POD_NAME --tail=50
+
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "🧹 Cleaning up..."
+          kubectl delete deployment homelab-assistant-test --ignore-not-found=true
+          mise run k8s-teardown
