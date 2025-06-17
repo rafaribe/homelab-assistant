@@ -1,190 +1,196 @@
 ---
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 name: Build and Publish
 
 on:
   push:
-    branches: [main, develop]
-    tags: ['v*']
-  pull_request:
-    branches: [main]
+    branches: ["main", "develop"]
+    paths: ["**"]
   workflow_dispatch:
     inputs:
-      push:
-        description: 'Push images to registry'
+      release:
+        type: boolean
+        description: Release
         required: false
         default: false
-        type: boolean
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  prepare:
-    name: Prepare Build
+  plan:
+    name: Plan
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.version.outputs.version }}
-      is-valid-semver: ${{ steps.version.outputs.is-valid-semver }}
-      semantic: ${{ steps.version.outputs.semantic }}
-      raw: ${{ steps.version.outputs.raw }}
-      should-push: ${{ steps.push.outputs.should-push }}
+      platforms: ${{ steps.platforms.outputs.platforms }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          persist-credentials: false
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install semver
-        run: npm install semver
-
-      - name: Generate Version
-        id: version
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const semver = require('semver');
-            
-            // Get version from various sources
-            let version = '';
-            
-            if (context.eventName === 'push' && context.ref.startsWith('refs/tags/')) {
-              // Tag push - use the tag
-              version = context.ref.replace('refs/tags/', '');
-            } else if (context.eventName === 'push' && context.ref === 'refs/heads/main') {
-              // Main branch - use CalVer
-              const now = new Date();
-              version = `${now.getFullYear()}.${(now.getMonth() + 1).toString().padStart(2, '0')}.${now.getDate().toString().padStart(2, '0')}`;
-            } else {
-              // PR or develop - use branch-based version
-              const now = new Date();
-              const branch = context.ref.replace('refs/heads/', '').replace(/[^a-zA-Z0-9]/g, '-');
-              version = `${now.getFullYear()}.${(now.getMonth() + 1).toString().padStart(2, '0')}.${now.getDate().toString().padStart(2, '0')}-${branch}`;
-            }
-            
-            // Strip the v prefix and pre-release info for raw version
-            function sanitize(version) {
-              return version.replace(/^v/, '').split('-')[0];
-            }
-            
-            function calver() {
-              const now = new Date();
-              return `${now.getFullYear()}.${(now.getMonth() + 1).toString().padStart(2, '0')}.${now.getDate().toString().padStart(2, '0')}`;
-            }
-            
-            const strictSemverRegex = /^v?(\d+(\.\d+)?(\.\d+)?)/;
-            const parsedVersion = strictSemverRegex.exec(version);
-            const isValidSemver = parsedVersion !== null;
-            const parsedSemver = isValidSemver ? semver.coerce(parsedVersion[0], {loose: true}) : null;
-            const semanticVersion = isValidSemver ? `${parsedSemver.major}.${parsedSemver.minor}.${parsedSemver.patch}` : calver();
-            const rawVersion = isValidSemver ? sanitize(version) : version;
-            
-            core.setOutput('version', version);
-            core.setOutput('is-valid-semver', isValidSemver);
-            core.setOutput('semantic', semanticVersion);
-            core.setOutput('raw', rawVersion);
-            
-            console.log(`Version: ${version}`);
-            console.log(`Is valid semver: ${isValidSemver}`);
-            console.log(`Semantic: ${semanticVersion}`);
-            console.log(`Raw: ${rawVersion}`);
-
-      - name: Determine Push
-        id: push
+      - name: Set Platforms
+        id: platforms
         run: |
-          SHOULD_PUSH="false"
-          if [[ "${{ github.event_name }}" == "push" && ("${{ github.ref }}" == "refs/heads/main" || "${{ github.ref }}" == "refs/heads/develop" || "${{ github.ref }}" == refs/tags/*) ]]; then
-            SHOULD_PUSH="true"
-          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.push }}" == "true" ]]; then
-            SHOULD_PUSH="true"
+          echo 'platforms=["linux/amd64", "linux/arm64"]' >> $GITHUB_OUTPUT
+
+      - name: Get Application Versions
+        id: app-versions
+        run: |
+          # Use CalVer as primary versioning scheme: YYYY.MM.DD
+          CALVER=$(date +'%Y.%-m.%-d')
+          
+          # For tagged releases, still respect semver but prefer CalVer
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            TAG_VERSION="${{ github.ref_name }}"
+            # Check if tag follows CalVer pattern (YYYY.M.D or YYYY.MM.DD)
+            if [[ $TAG_VERSION =~ ^v?[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}.*$ ]]; then
+              VERSION=$(echo $TAG_VERSION | sed 's/^v//')
+              IS_VALID_SEMVER="false"  # Treat CalVer tags as non-semver
+            elif [[ $TAG_VERSION =~ ^v?[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
+              # Traditional semver tag - convert to CalVer for consistency
+              VERSION=$CALVER
+              IS_VALID_SEMVER="true"
+              SEMVER_VERSION=$(echo $TAG_VERSION | sed 's/^v//' | cut -d'-' -f1)
+            else
+              VERSION=$CALVER
+              IS_VALID_SEMVER="false"
+            fi
+          else
+            # Non-tag builds always use CalVer
+            VERSION=$CALVER
+            IS_VALID_SEMVER="false"
           fi
-          echo "should-push=${SHOULD_PUSH}" >> $GITHUB_OUTPUT
-          echo "Should push: ${SHOULD_PUSH}"
+          
+          # Add branch suffix for non-main branches (except tags)
+          if [[ "${{ github.ref_type }}" != "tag" && "${{ github.ref_name }}" != "main" ]]; then
+            BRANCH_SUFFIX=$(echo "${{ github.ref_name }}" | sed 's/[^a-zA-Z0-9]/-/g')
+            VERSION="${VERSION}-${BRANCH_SUFFIX}"
+          fi
+          
+          echo "semantic=$VERSION" >> $GITHUB_OUTPUT
+          echo "raw=$VERSION" >> $GITHUB_OUTPUT
+          echo "calver=$CALVER" >> $GITHUB_OUTPUT
+          echo "is-valid-semver=$IS_VALID_SEMVER" >> $GITHUB_OUTPUT
+          echo "upstream=$VERSION" >> $GITHUB_OUTPUT
+          
+          # Set semver version if we detected one
+          if [[ "$IS_VALID_SEMVER" == "true" ]]; then
+            echo "semver-version=${SEMVER_VERSION:-$VERSION}" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "Generated version: $VERSION"
+          echo "CalVer base: $CALVER"
+          echo "Is semver: $IS_VALID_SEMVER"
 
-  build:
-    name: Build (${{ matrix.platform }})
-    needs: [prepare]
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: linux/amd64
-            runner: ubuntu-latest
-          - platform: linux/arm64
-            runner: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install mise
-        uses: jdx/mise-action@v2
-        with:
-          install: true
-          cache: true
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to Container Registry
-        if: needs.prepare.outputs.should-push == 'true'
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
+      - name: Build Application Metadata
         uses: docker/metadata-action@v5
+        id: meta
         env:
           DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          flavor: |
-            latest=false
+          flavor: latest=false
+          images: |
+            ghcr.io/${{ github.repository }}
           tags: |
-            type=semver,pattern={{version}},value=${{ needs.prepare.outputs.semantic }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ needs.prepare.outputs.semantic }},enable=${{ needs.prepare.outputs.is-valid-semver }}
-            type=semver,pattern={{major}},value=${{ needs.prepare.outputs.semantic }},enable=${{ needs.prepare.outputs.is-valid-semver }}
-            type=raw,value=${{ needs.prepare.outputs.raw }},enable=${{ needs.prepare.outputs.is-valid-semver }}
+            # CalVer-based tagging (primary scheme)
+            type=raw,value=${{ steps.app-versions.outputs.calver }},enable=${{ github.ref_name == 'main' }}
+            type=raw,value=${{ steps.app-versions.outputs.raw }}
+            # Semver compatibility (if detected from tags)
+            type=semver,pattern={{version}},value=${{ steps.app-versions.outputs.semver-version }},enable=${{ steps.app-versions.outputs.is-valid-semver }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.app-versions.outputs.semver-version }},enable=${{ steps.app-versions.outputs.is-valid-semver }}
+            # Special tags
+            type=raw,value=rolling
             type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
-            type=sha,prefix={{branch}}-,enable=${{ github.event_name == 'pull_request' }}
+            type=raw,value=develop,enable=${{ github.ref_name == 'develop' }}
           labels: |
             org.opencontainers.image.title=homelab-assistant
             org.opencontainers.image.description=Kubernetes operator for homelab automation
             org.opencontainers.image.vendor=${{ github.repository_owner }}
-            org.opencontainers.image.version=${{ needs.prepare.outputs.version }}
+            org.opencontainers.image.version=${{ steps.app-versions.outputs.raw }}
+            org.opencontainers.image.created={{date 'iso8601'}}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
 
-      - name: Build and push
-        id: build
-        uses: docker/build-push-action@v6
+      - name: Upload Bake Metadata
+        uses: actions/upload-artifact@v4
         with:
-          context: .
-          platforms: ${{ matrix.platform }}
-          push: ${{ needs.prepare.outputs.should-push == 'true' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          annotations: ${{ steps.meta.outputs.annotations }}
-          cache-from: type=gha,scope=${{ github.workflow }}-${{ matrix.platform }}
-          cache-to: type=gha,mode=max,scope=${{ github.workflow }}-${{ matrix.platform }}
-          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=${{ needs.prepare.outputs.should-push == 'true' }}
+          name: bake-metadata
+          path: ${{ steps.meta.outputs.bake-file }}
+          if-no-files-found: error
+          retention-days: 1
 
-      - name: Export digest
-        if: needs.prepare.outputs.should-push == 'true'
+  build:
+    name: Build (${{ matrix.platform }})
+    needs: ["plan"]
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJson(needs.plan.outputs.platforms) }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Get Target Architecture
+        uses: actions/github-script@v7
+        id: target
+        with:
+          script: |
+            core.setOutput('arch', '${{ matrix.platform }}'.split('/').pop());
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Download Bake Metadata
+        uses: actions/download-artifact@v4
+        with:
+          name: bake-metadata
+          path: ${{ runner.temp }}
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Application
+        uses: docker/bake-action@v5
+        id: bake
+        with:
+          files: |
+            ./docker-bake.hcl
+            cwd://${{ runner.temp }}/docker-metadata-action-bake.json
+          set: |
+            *.args.VENDOR=${{ github.repository_owner }}
+            *.cache-from=${{ format('type=registry,ref=ghcr.io/{0}/build_cache:homelab-assistant-{1},mode=max', github.repository_owner, steps.target.outputs.arch) }}
+            *.cache-to=${{ (github.event_name == 'push' || inputs.release) && format('type=registry,ref=ghcr.io/{0}/build_cache:homelab-assistant-{1},mode=max,compression=zstd,force-compression=true', github.repository_owner, steps.target.outputs.arch) || '' }}
+            *.labels.org.opencontainers.image.title=homelab-assistant
+            *.labels.org.opencontainers.image.url=https://ghcr.io/${{ github.repository }}
+            *.labels.org.opencontainers.image.revision=${{ github.sha }}
+            *.labels.org.opencontainers.image.vendor=${{ github.repository_owner }}
+            ${{ (github.event_name == 'push' || inputs.release) && format('*.output=type=image,name=ghcr.io/{0},push-by-digest=true,name-canonical=true,push=true', github.repository) || '*.output=type=docker,name=homelab-assistant:test' }}
+            *.platform=${{ matrix.platform }}
+            *.tags=
+          source: .
+          targets: image
+          workdir: .
+
+      - name: Run Application Tests
+        if: ${{ ! (github.event_name == 'push' || inputs.release) }}
+        uses: ./.github/workflows/test-image.yml
+        with:
+          image: homelab-assistant:test
+
+      - if: ${{ github.event_name == 'push' || inputs.release }}
+        name: Export digest
         run: |
           mkdir -p /tmp/digests
-          digest="${{ steps.build.outputs.digest }}"
+          digest="${{ fromJSON(steps.bake.outputs.metadata).image['containerimage.digest'] }}"
           touch "/tmp/digests/${digest#sha256:}"
 
-      - name: Upload digest
-        if: needs.prepare.outputs.should-push == 'true'
+      - if: ${{ github.event_name == 'push' || inputs.release }}
+        name: Upload digest
         uses: actions/upload-artifact@v4
         with:
           name: digests-${{ strategy.job-index }}
@@ -193,11 +199,17 @@ jobs:
           retention-days: 1
 
   merge:
-    name: Create Multi-Platform Manifest
-    if: needs.prepare.outputs.should-push == 'true'
+    if: ${{ github.event_name == 'push' || inputs.release }}
+    name: Merge
     runs-on: ubuntu-latest
-    needs: [prepare, build]
+    needs: ["plan", "build"]
     steps:
+      - name: Download metadata
+        uses: actions/download-artifact@v4
+        with:
+          name: bake-metadata
+          path: /tmp
+
       - name: Download digests
         uses: actions/download-artifact@v4
         with:
@@ -208,65 +220,19 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Container Registry
+      - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          flavor: |
-            latest=false
-          tags: |
-            type=semver,pattern={{version}},value=${{ needs.prepare.outputs.semantic }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ needs.prepare.outputs.semantic }},enable=${{ needs.prepare.outputs.is-valid-semver }}
-            type=semver,pattern={{major}},value=${{ needs.prepare.outputs.semantic }},enable=${{ needs.prepare.outputs.is-valid-semver }}
-            type=raw,value=${{ needs.prepare.outputs.raw }},enable=${{ needs.prepare.outputs.is-valid-semver }}
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
-            type=sha,prefix={{branch}}-,enable=${{ github.event_name == 'pull_request' }}
+          password: ${{ github.token }}
 
       - name: Create manifest list and push
         working-directory: /tmp/digests
         run: |
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' < /tmp/docker-metadata-action-bake.json) \
+            $(printf 'ghcr.io/${{ github.repository }}@sha256:%s ' *)
 
       - name: Inspect image
         run: |
-          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
-
-  summary:
-    name: Build Summary
-    if: always()
-    needs: [prepare, build, merge]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Create Summary
-        run: |
-          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** ${{ needs.prepare.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Semantic Version:** ${{ needs.prepare.outputs.semantic }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Raw Version:** ${{ needs.prepare.outputs.raw }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Valid Semver:** ${{ needs.prepare.outputs.is-valid-semver }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Should Push:** ${{ needs.prepare.outputs.should-push }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          if [[ "${{ needs.prepare.outputs.should-push }}" == "true" ]]; then
-            echo "**Registry:** ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### Available Tags:" >> $GITHUB_STEP_SUMMARY
-            echo "- \`latest\` (main branch)" >> $GITHUB_STEP_SUMMARY
-            echo "- \`develop\` (develop branch)" >> $GITHUB_STEP_SUMMARY
-            echo "- \`${{ needs.prepare.outputs.semantic }}\`" >> $GITHUB_STEP_SUMMARY
-            if [[ "${{ needs.prepare.outputs.is-valid-semver }}" == "true" ]]; then
-              echo "- \`${{ needs.prepare.outputs.raw }}\`" >> $GITHUB_STEP_SUMMARY
-            fi
-          else
-            echo "**Note:** Images were built but not pushed to registry" >> $GITHUB_STEP_SUMMARY
-          fi
+          docker buildx imagetools inspect ghcr.io/${{ github.repository }}:rolling

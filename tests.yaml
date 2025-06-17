@@ -1,0 +1,29 @@
+---
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Test homelab-assistant
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: Image to test
+        required: true
+        type: string
+
+jobs:
+  test:
+    name: Test Image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Test version command
+        run: |
+          docker run --rm ${{ inputs.image }} --version
+
+      - name: Test help command
+        run: |
+          docker run --rm ${{ inputs.image }} --help
+
+      - name: Test container starts
+        run: |
+          # Test that the container can start without immediate crash
+          timeout 10s docker run --rm ${{ inputs.image }} || [ $? -eq 124 ]
