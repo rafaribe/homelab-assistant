@@ -1,0 +1,34 @@
+apiVersion: homelab.rafaribe.com/v1alpha1
+kind: VolSyncMonitor
+metadata:
+  name: volsync-monitor
+  namespace: homelab-assistant-system
+spec:
+  # Enable the monitor
+  enabled: true
+  
+  # Remove failed jobs after creating unlock jobs
+  removeFailedJobs: true
+  
+  # Simple unlock job template
+  unlockJobTemplate:
+    image: "restic/restic:latest"
+    command: ["/bin/sh"]
+    args: 
+      - "-c"
+      - |
+        echo "Unlocking repository for failed job: $FAILED_JOB_NAME"
+        restic unlock
+        echo "Repository unlocked successfully"
+    
+    # Basic resource limits
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "100m"
+      limits:
+        memory: "128Mi"
+        cpu: "200m"
+  
+  # Cleanup unlock jobs after 1 hour
+  ttlSecondsAfterFinished: 3600

@@ -1,0 +1,32 @@
+apiVersion: homelab.rafaribe.com/v1alpha1
+kind: VolSyncMonitor
+metadata:
+  labels:
+    app.kubernetes.io/name: homelab-assistant
+    app.kubernetes.io/managed-by: kustomize
+  name: volsyncmonitor-sample
+spec:
+  enabled: true
+  removeFailedJobs: true
+  unlockJobTemplate:
+    image: "restic/restic:latest"
+    command: ["/bin/sh"]
+    args: 
+      - "-c"
+      - |
+        echo "Unlocking repository for failed job: $FAILED_JOB_NAME"
+        restic unlock
+        echo "Repository unlocked successfully"
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "100m"
+      limits:
+        memory: "128Mi"
+        cpu: "200m"
+    securityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+  ttlSecondsAfterFinished: 3600
+  maxConcurrentUnlocks: 3

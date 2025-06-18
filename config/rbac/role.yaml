@@ -15,14 +15,8 @@ rules:
   - ""
   resources:
   - namespaces
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - ""
-  resources:
   - pods
+  - secrets
   verbs:
   - get
   - list
@@ -34,14 +28,6 @@ rules:
   verbs:
   - get
   - list
-- apiGroups:
-  - ""
-  resources:
-  - secrets
-  verbs:
-  - get
-  - list
-  - watch
 - apiGroups:
   - batch
   resources:
@@ -76,32 +62,6 @@ rules:
   - homelab.rafaribe.com
   resources:
   - volsyncmonitors/status
-  verbs:
-  - get
-  - patch
-  - update
-- apiGroups:
-  - homelab.rafaribe.com
-  resources:
-  - volsyncunlocks
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - homelab.rafaribe.com
-  resources:
-  - volsyncunlocks/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - homelab.rafaribe.com
-  resources:
-  - volsyncunlocks/status
   verbs:
   - get
   - patch

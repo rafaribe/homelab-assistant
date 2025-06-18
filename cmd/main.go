@@ -137,11 +137,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.VolSyncUnlockReconciler{
+	if err = (&controller.VolSyncMonitorReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "VolSyncUnlock")
+		setupLog.Error(err, "unable to create controller", "controller", "VolSyncMonitor")
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder

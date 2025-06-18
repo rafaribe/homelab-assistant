@@ -43,15 +43,9 @@ type VolSyncMonitorReconciler struct {
 func (r *VolSyncMonitorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	// Check if this is a VolSync job that failed
-	if strings.Contains(req.Name, "volsync-") {
-		return r.handleVolSyncJob(ctx, req)
-	}
-
-	// Otherwise, handle VolSyncMonitor resource
-	monitor := &volsyncv1alpha1.VolSyncMonitor{}
-	err := r.Get(ctx, req.NamespacedName, monitor)
-	if err != nil {
+	// Get the VolSyncMonitor instance
+	var monitor volsyncv1alpha1.VolSyncMonitor
+	if err := r.Get(ctx, req.NamespacedName, &monitor); err != nil {
 		if errors.IsNotFound(err) {
 			logger.Info("VolSyncMonitor resource not found. Ignoring since object must be deleted")
 			return ctrl.Result{}, nil
@@ -60,567 +54,462 @@ func (r *VolSyncMonitorReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
-	// Add finalizer if not present
-	if !controllerutil.ContainsFinalizer(monitor, "homelab.rafaribe.com/finalizer") {
-		controllerutil.AddFinalizer(monitor, "homelab.rafaribe.com/finalizer")
-		return ctrl.Result{}, r.Update(ctx, monitor)
+	// Check if monitor is enabled
+	if !monitor.Spec.Enabled {
+		logger.Info("VolSyncMonitor is disabled, skipping reconciliation")
+		return ctrl.Result{RequeueAfter: time.Minute * 5}, nil
 	}
 
-	// Handle deletion
-	if monitor.DeletionTimestamp != nil {
-		return r.handleDeletion(ctx, monitor)
+	// Update status phase
+	if monitor.Status.Phase == "" {
+		monitor.Status.Phase = volsyncv1alpha1.VolSyncMonitorPhaseActive
+	}
+
+	// Main reconciliation logic
+	result, err := r.reconcileMonitor(ctx, &monitor)
+	if err != nil {
+		monitor.Status.Phase = volsyncv1alpha1.VolSyncMonitorPhaseError
+		monitor.Status.LastError = err.Error()
+		logger.Error(err, "Failed to reconcile VolSyncMonitor")
+	} else {
+		monitor.Status.Phase = volsyncv1alpha1.VolSyncMonitorPhaseActive
+		monitor.Status.LastError = ""
 	}
 
 	// Update status
-	monitor.Status.Phase = volsyncv1alpha1.VolSyncMonitorPhaseActive
-	if !monitor.Spec.Enabled {
-		monitor.Status.Phase = volsyncv1alpha1.VolSyncMonitorPhasePaused
+	monitor.Status.ObservedGeneration = monitor.Generation
+	if err := r.Status().Update(ctx, &monitor); err != nil {
+		logger.Error(err, "Failed to update VolSyncMonitor status")
+		return ctrl.Result{}, err
 	}
 
-	return ctrl.Result{}, r.Status().Update(ctx, monitor)
+	return result, err
 }
 
-func (r *VolSyncMonitorReconciler) handleVolSyncJob(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *VolSyncMonitorReconciler) reconcileMonitor(ctx context.Context, monitor *volsyncv1alpha1.VolSyncMonitor) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	// Get the job
-	job := &batchv1.Job{}
-	err := r.Get(ctx, req.NamespacedName, job)
+	// Step 1: Find failed VolSync jobs
+	failedJobs, err := r.findFailedVolSyncJobs(ctx, monitor)
 	if err != nil {
-		if errors.IsNotFound(err) {
-			return ctrl.Result{}, nil
+		return ctrl.Result{}, fmt.Errorf("failed to find failed VolSync jobs: %w", err)
+	}
+
+	// Step 2: Process each failed job
+	for _, job := range failedJobs {
+		// Skip if already processed
+		if r.isJobAlreadyProcessed(monitor, job) {
+			continue
 		}
-		return ctrl.Result{}, err
-	}
 
-	// Only process failed VolSync jobs
-	if !r.isVolSyncJob(job) || !r.isJobFailed(job) {
-		return ctrl.Result{}, nil
-	}
+		// Check if job has lock errors
+		hasLockError, lockError, err := r.checkJobForLockErrors(ctx, job, monitor.Spec.LockErrorPatterns)
+		if err != nil {
+			logger.Error(err, "Failed to check job for lock errors", "job", job.Name, "namespace", job.Namespace)
+			continue
+		}
 
-	logger.Info("Processing failed VolSync job", "job", job.Name, "namespace", job.Namespace)
-
-	// Check if we have any active monitors
-	monitors, err := r.getActiveMonitors(ctx)
-	if err != nil {
-		logger.Error(err, "Failed to get active monitors")
-		return ctrl.Result{}, err
-	}
-
-	if len(monitors) == 0 {
-		logger.Info("No active VolSync monitors found")
-		return ctrl.Result{}, nil
-	}
-
-	// Check job logs for lock errors
-	hasLockError, err := r.checkJobLogsForLockErrors(ctx, job, monitors[0])
-	if err != nil {
-		logger.Error(err, "Failed to check job logs")
-		return ctrl.Result{}, err
-	}
-
-	if !hasLockError {
-		logger.Info("No lock errors found in job logs", "job", job.Name)
-		return ctrl.Result{}, nil
-	}
-
-	// Extract app info from job
-	appName, objectName := r.extractAppInfoFromJob(job)
-	if appName == "" || objectName == "" {
-		logger.Info("Could not extract app info from job", "job", job.Name)
-		return ctrl.Result{}, nil
-	}
-
-	// Create unlock job
-	for _, monitor := range monitors {
-		if r.canCreateUnlockJob(monitor) {
-			err := r.createUnlockJobForFailedJob(ctx, &monitor, job, appName, objectName)
+		if hasLockError {
+			logger.Info("Lock error detected in failed job", "job", job.Name, "namespace", job.Namespace, "error", lockError)
+			
+			// Create unlock job
+			unlockJob, err := r.createUnlockJob(ctx, monitor, job, lockError)
 			if err != nil {
-				logger.Error(err, "Failed to create unlock job")
+				logger.Error(err, "Failed to create unlock job", "job", job.Name)
 				continue
 			}
-			logger.Info("Created unlock job for failed VolSync job",
-				"volsyncJob", job.Name,
-				"app", appName,
-				"object", objectName)
-			break
+
+			// Remove failed job if configured to do so
+			if monitor.Spec.RemoveFailedJobs {
+				if err := r.removeFailedJob(ctx, job); err != nil {
+					logger.Error(err, "Failed to remove failed job", "job", job.Name)
+					// Continue anyway - we still want to track the unlock job
+				} else {
+					monitor.Status.TotalFailedJobsRemoved++
+					logger.Info("Removed failed job", "job", job.Name, "namespace", job.Namespace)
+				}
+			}
+
+			// Track the processed job
+			processedJob := volsyncv1alpha1.ProcessedJob{
+				JobName:       job.Name,
+				Namespace:     job.Namespace,
+				ProcessedTime: metav1.Now(),
+				UnlockJobName: unlockJob.Name,
+				Removed:       monitor.Spec.RemoveFailedJobs,
+				LockError:     lockError,
+			}
+			monitor.Status.ProcessedJobs = append(monitor.Status.ProcessedJobs, processedJob)
+
+			// Update counters
+			monitor.Status.TotalLockErrorsDetected++
+			monitor.Status.TotalUnlocksCreated++
+			monitor.Status.LastUnlockTime = &metav1.Time{Time: time.Now()}
 		}
 	}
 
-	return ctrl.Result{}, nil
+	// Step 3: Update active unlocks status
+	if err := r.updateActiveUnlocks(ctx, monitor); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to update active unlocks: %w", err)
+	}
+
+	// Step 4: Clean up old processed jobs (keep last 50)
+	r.cleanupProcessedJobs(monitor)
+
+	// Requeue after 30 seconds to continuously monitor
+	return ctrl.Result{RequeueAfter: time.Second * 30}, nil
 }
 
-func (r *VolSyncMonitorReconciler) isVolSyncJob(job *batchv1.Job) bool {
-	// Check if job is created by VolSync
-	if job.Labels != nil {
-		if createdBy, exists := job.Labels["app.kubernetes.io/created-by"]; exists && createdBy == "volsync" {
+func (r *VolSyncMonitorReconciler) findFailedVolSyncJobs(ctx context.Context, monitor *volsyncv1alpha1.VolSyncMonitor) ([]batchv1.Job, error) {
+	var failedJobs []batchv1.Job
+
+	// Determine namespaces to search
+	namespaces := []string{}
+	if monitor.Spec.JobSelector != nil {
+		namespaces = monitor.Spec.JobSelector.Namespaces
+	}
+	if len(namespaces) == 0 {
+		// Get all namespaces
+		var nsList corev1.NamespaceList
+		if err := r.List(ctx, &nsList); err != nil {
+			return nil, fmt.Errorf("failed to list namespaces: %w", err)
+		}
+		for _, ns := range nsList.Items {
+			namespaces = append(namespaces, ns.Name)
+		}
+	}
+
+	// Search in each namespace
+	for _, namespace := range namespaces {
+		var jobList batchv1.JobList
+		listOpts := []client.ListOption{
+			client.InNamespace(namespace),
+		}
+
+		if err := r.List(ctx, &jobList, listOpts...); err != nil {
+			return nil, fmt.Errorf("failed to list jobs in namespace %s: %w", namespace, err)
+		}
+
+		// Filter jobs based on selector
+		for _, job := range jobList.Items {
+			if r.matchesJobSelector(job, monitor.Spec.JobSelector) && r.isJobFailed(job) {
+				failedJobs = append(failedJobs, job)
+			}
+		}
+	}
+
+	return failedJobs, nil
+}
+
+func (r *VolSyncMonitorReconciler) matchesJobSelector(job batchv1.Job, selector *volsyncv1alpha1.JobSelector) bool {
+	if selector == nil {
+		// Default: match jobs with "volsync-" prefix
+		return strings.HasPrefix(job.Name, "volsync-")
+	}
+
+	// Check name prefix
+	namePrefix := selector.NamePrefix
+	if namePrefix == "" {
+		namePrefix = "volsync-"
+	}
+	if !strings.HasPrefix(job.Name, namePrefix) {
+		return false
+	}
+
+	// Check label selector
+	if len(selector.LabelSelector) > 0 {
+		for key, value := range selector.LabelSelector {
+			if jobValue, exists := job.Labels[key]; !exists || jobValue != value {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+func (r *VolSyncMonitorReconciler) isJobFailed(job batchv1.Job) bool {
+	for _, condition := range job.Status.Conditions {
+		if condition.Type == batchv1.JobFailed && condition.Status == corev1.ConditionTrue {
 			return true
 		}
 	}
-
-	// Check job name patterns
-	return strings.HasPrefix(job.Name, "volsync-src-") || strings.HasPrefix(job.Name, "volsync-dst-")
+	return false
 }
 
-func (r *VolSyncMonitorReconciler) isJobFailed(job *batchv1.Job) bool {
-	return job.Status.Failed > 0
-}
-
-func (r *VolSyncMonitorReconciler) getActiveMonitors(ctx context.Context) ([]volsyncv1alpha1.VolSyncMonitor, error) {
-	monitorList := &volsyncv1alpha1.VolSyncMonitorList{}
-	err := r.List(ctx, monitorList)
-	if err != nil {
-		return nil, err
-	}
-
-	var activeMonitors []volsyncv1alpha1.VolSyncMonitor
-	for _, monitor := range monitorList.Items {
-		if monitor.Spec.Enabled {
-			activeMonitors = append(activeMonitors, monitor)
+func (r *VolSyncMonitorReconciler) isJobAlreadyProcessed(monitor *volsyncv1alpha1.VolSyncMonitor, job batchv1.Job) bool {
+	for _, processed := range monitor.Status.ProcessedJobs {
+		if processed.JobName == job.Name && processed.Namespace == job.Namespace {
+			return true
 		}
 	}
-
-	return activeMonitors, nil
+	return false
 }
 
-func (r *VolSyncMonitorReconciler) checkJobLogsForLockErrors(ctx context.Context, job *batchv1.Job, monitor volsyncv1alpha1.VolSyncMonitor) (bool, error) {
-	logger := log.FromContext(ctx)
-
-	// Get pods for this job
-	podList := &corev1.PodList{}
-	err := r.List(ctx, podList, client.InNamespace(job.Namespace), client.MatchingLabels{
-		"job-name": job.Name,
-	})
-	if err != nil {
-		return false, err
-	}
-
-	if len(podList.Items) == 0 {
-		logger.Info("No pods found for job", "job", job.Name)
-		return false, nil
-	}
-
+func (r *VolSyncMonitorReconciler) checkJobForLockErrors(ctx context.Context, job batchv1.Job, patterns []string) (bool, string, error) {
 	// Default lock error patterns if none specified
-	lockPatterns := monitor.Spec.LockErrorPatterns
-	if len(lockPatterns) == 0 {
-		lockPatterns = []string{
-			"repository is already locked",
-			"unable to create lock",
-			"repository locked",
-			"lock.*already.*exists",
-			"failed to create lock",
-		}
+	defaultPatterns := []string{
+		"repository is already locked",
+		"unable to create lock",
+		"repository.*locked",
+		"lock.*already exists",
+	}
+
+	if len(patterns) == 0 {
+		patterns = defaultPatterns
 	}
 
 	// Compile regex patterns
-	var regexPatterns []*regexp.Regexp
-	for _, pattern := range lockPatterns {
+	var regexes []*regexp.Regexp
+	for _, pattern := range patterns {
 		regex, err := regexp.Compile("(?i)" + pattern) // Case insensitive
 		if err != nil {
-			logger.Error(err, "Invalid regex pattern", "pattern", pattern)
-			continue
+			return false, "", fmt.Errorf("invalid regex pattern %s: %w", pattern, err)
 		}
-		regexPatterns = append(regexPatterns, regex)
+		regexes = append(regexes, regex)
+	}
+
+	// Get pods for this job
+	var podList corev1.PodList
+	listOpts := []client.ListOption{
+		client.InNamespace(job.Namespace),
+		client.MatchingLabels{"job-name": job.Name},
+	}
+
+	if err := r.List(ctx, &podList, listOpts...); err != nil {
+		return false, "", fmt.Errorf("failed to list pods for job %s: %w", job.Name, err)
 	}
 
 	// Check logs of each pod
 	for _, pod := range podList.Items {
-		if pod.Status.Phase == corev1.PodFailed {
-			logs, err := r.getPodLogs(ctx, &pod)
-			if err != nil {
-				logger.Error(err, "Failed to get pod logs", "pod", pod.Name)
-				continue
-			}
+		logs, err := helpers.GetPodLogs(ctx, r.Client, pod.Namespace, pod.Name, "")
+		if err != nil {
+			continue // Skip pods we can't get logs from
+		}
 
-			// Check for lock error patterns
-			for _, regex := range regexPatterns {
-				if regex.MatchString(logs) {
-					// Extract app info for metrics
-					appName, objectName := r.extractAppInfoFromJob(job)
-
-					// Record metrics
-					helpers.RecordLockErrorDetected(job.Namespace, appName, objectName, regex.String())
-
-					logger.Info("Lock error detected in pod logs",
-						"pod", pod.Name,
-						"job", job.Name,
-						"pattern", regex.String(),
-						"app", appName,
-						"object", objectName)
-					return true, nil
+		// Check each line against patterns
+		lines := strings.Split(logs, "\n")
+		for _, line := range lines {
+			for _, regex := range regexes {
+				if regex.MatchString(line) {
+					return true, strings.TrimSpace(line), nil
 				}
 			}
 		}
 	}
 
-	return false, nil
+	return false, "", nil
 }
 
-func (r *VolSyncMonitorReconciler) getPodLogs(ctx context.Context, pod *corev1.Pod) (string, error) {
-	// For now, we'll check the pod status and events instead of logs
-	// This is simpler and doesn't require additional RBAC permissions for log streaming
-
-	// Check pod status message
-	if pod.Status.Message != "" {
-		return pod.Status.Message, nil
-	}
-
-	// Check container statuses
-	var messages []string
-	for _, containerStatus := range pod.Status.ContainerStatuses {
-		if containerStatus.State.Terminated != nil && containerStatus.State.Terminated.Message != "" {
-			messages = append(messages, containerStatus.State.Terminated.Message)
-		}
-		if containerStatus.State.Waiting != nil && containerStatus.State.Waiting.Message != "" {
-			messages = append(messages, containerStatus.State.Waiting.Message)
-		}
-	}
-
-	return strings.Join(messages, "\n"), nil
-}
-
-func (r *VolSyncMonitorReconciler) extractAppInfoFromJob(job *batchv1.Job) (string, string) {
-	// Try to extract from job name
-	// Pattern: volsync-src-<objectName> or volsync-dst-<objectName>
-	name := job.Name
-	if strings.HasPrefix(name, "volsync-src-") {
-		objectName := strings.TrimPrefix(name, "volsync-src-")
-		return r.guessAppNameFromObjectName(objectName), objectName
-	}
-	if strings.HasPrefix(name, "volsync-dst-") {
-		objectName := strings.TrimPrefix(name, "volsync-dst-")
-		return r.guessAppNameFromObjectName(objectName), objectName
-	}
-
-	// Try to extract from labels
-	if job.Labels != nil {
-		if app, exists := job.Labels["app"]; exists {
-			return app, job.Name
-		}
-	}
-
-	return "", ""
-}
-
-func (r *VolSyncMonitorReconciler) guessAppNameFromObjectName(objectName string) string {
-	// Common patterns: app-nfs, app-pvc, etc.
-	parts := strings.Split(objectName, "-")
-	if len(parts) > 1 {
-		return parts[0] // Return first part as app name
-	}
-	return objectName
-}
-
-func (r *VolSyncMonitorReconciler) canCreateUnlockJob(monitor volsyncv1alpha1.VolSyncMonitor) bool {
-	maxConcurrent := monitor.Spec.MaxConcurrentUnlocks
-	if maxConcurrent == 0 {
-		maxConcurrent = 3 // Default
-	}
-
-	return len(monitor.Status.ActiveUnlocks) < int(maxConcurrent)
-}
-
-func (r *VolSyncMonitorReconciler) createUnlockJobForFailedJob(ctx context.Context, monitor *volsyncv1alpha1.VolSyncMonitor, failedJob *batchv1.Job, appName, objectName string) error {
+func (r *VolSyncMonitorReconciler) createUnlockJob(ctx context.Context, monitor *volsyncv1alpha1.VolSyncMonitor, failedJob batchv1.Job, lockError string) (*batchv1.Job, error) {
 	logger := log.FromContext(ctx)
 
-	// Record metrics
-	helpers.RecordUnlockJobCreated(failedJob.Namespace, appName, objectName)
-	helpers.RecordActiveUnlockJob(failedJob.Namespace, appName, objectName)
+	// Generate unique name for unlock job
+	unlockJobName := fmt.Sprintf("volsync-unlock-%s-%d", failedJob.Name, time.Now().Unix())
 
-	// Update monitor status
-	now := metav1.Now()
-	monitor.Status.TotalUnlocksCreated++
-	monitor.Status.LastUnlockTime = &now
+	// Build job spec from template
+	jobSpec := r.buildUnlockJobSpec(monitor, failedJob, unlockJobName, lockError)
 
-	// Add to active unlocks
-	jobName := fmt.Sprintf("volsync-unlock-%s-%s-%d", appName, objectName, time.Now().Unix())
-	activeUnlock := volsyncv1alpha1.ActiveUnlock{
-		AppName:          appName,
-		Namespace:        failedJob.Namespace,
-		ObjectName:       objectName,
-		JobName:          jobName,
-		StartTime:        now,
-		AlertFingerprint: fmt.Sprintf("%s-%s-%s", failedJob.Namespace, appName, objectName),
-	}
-
-	monitor.Status.ActiveUnlocks = append(monitor.Status.ActiveUnlocks, activeUnlock)
-
-	// Update status
-	if err := r.Status().Update(ctx, monitor); err != nil {
-		logger.Error(err, "Failed to update monitor status")
-		return err
-	}
-
-	// Build restic unlock command
-	command := []string{"restic"}
-	args := []string{"unlock", "--remove-all"}
-
-	// Override with custom command/args if provided
-	if len(monitor.Spec.UnlockJobTemplate.Command) > 0 {
-		command = monitor.Spec.UnlockJobTemplate.Command
-	}
-	if len(monitor.Spec.UnlockJobTemplate.Args) > 0 {
-		args = monitor.Spec.UnlockJobTemplate.Args
-	}
-
-	// Get environment variables from the secret (same pattern as VolSync)
-	envVars, err := r.buildResticEnvVars(ctx, appName, failedJob.Namespace, objectName)
-	if err != nil {
-		return fmt.Errorf("failed to build environment variables: %w", err)
-	}
-
-	// Discover volume configuration from the failed VolSync job
-	volumes, volumeMounts, err := r.discoverVolSyncVolumeConfig(ctx, failedJob)
-	if err != nil {
-		return fmt.Errorf("failed to discover VolSync volume configuration: %w", err)
-	}
-
-	job := &batchv1.Job{
+	unlockJob := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      jobName,
+			Name:      unlockJobName,
 			Namespace: failedJob.Namespace,
 			Labels: map[string]string{
-				"app":                             "volsync-unlock",
-				"homelab.rafaribe.com/app":        appName,
-				"homelab.rafaribe.com/object":     objectName,
-				"homelab.rafaribe.com/monitor":    monitor.Name,
+				"app.kubernetes.io/name":       "homelab-assistant",
+				"app.kubernetes.io/component":  "volsync-unlock",
+				"app.kubernetes.io/created-by": "volsync-monitor",
+				"homelab.rafaribe.com/monitor": monitor.Name,
 				"homelab.rafaribe.com/failed-job": failedJob.Name,
 			},
-			// Copy annotations that might trigger admission policies
 			Annotations: map[string]string{
-				"homelab.rafaribe.com/volsync-unlock": "true",
-				"homelab.rafaribe.com/app":            appName,
-				"homelab.rafaribe.com/object":         objectName,
+				"homelab.rafaribe.com/lock-error": lockError,
+				"homelab.rafaribe.com/failed-job": fmt.Sprintf("%s/%s", failedJob.Namespace, failedJob.Name),
 			},
 		},
-		Spec: batchv1.JobSpec{
-			TTLSecondsAfterFinished: monitor.Spec.TTLSecondsAfterFinished,
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"app":                         "volsync-unlock",
-						"homelab.rafaribe.com/app":    appName,
-						"homelab.rafaribe.com/object": objectName,
-					},
-					// Copy annotations to pod template for admission policies
-					Annotations: map[string]string{
-						"homelab.rafaribe.com/volsync-unlock": "true",
-						"homelab.rafaribe.com/app":            appName,
-						"homelab.rafaribe.com/object":         objectName,
-					},
-				},
-				Spec: corev1.PodSpec{
-					RestartPolicy: corev1.RestartPolicyNever,
-					Containers: []corev1.Container{
-						{
-							Name:         "restic-unlock",
-							Image:        monitor.Spec.UnlockJobTemplate.Image,
-							Command:      command,
-							Args:         args,
-							Env:          envVars,
-							VolumeMounts: volumeMounts,
-							Resources: corev1.ResourceRequirements{
-								Limits:   r.convertResources(r.getResourceLimits(monitor.Spec.UnlockJobTemplate.Resources)),
-								Requests: r.convertResources(r.getResourceRequests(monitor.Spec.UnlockJobTemplate.Resources)),
-							},
-						},
-					},
-					Volumes: volumes,
-				},
+		Spec: *jobSpec,
+	}
+
+	// Set owner reference to the monitor
+	if err := controllerutil.SetControllerReference(monitor, unlockJob, r.Scheme); err != nil {
+		return nil, fmt.Errorf("failed to set controller reference: %w", err)
+	}
+
+	// Create the job
+	if err := r.Create(ctx, unlockJob); err != nil {
+		return nil, fmt.Errorf("failed to create unlock job: %w", err)
+	}
+
+	logger.Info("Created unlock job", "job", unlockJobName, "namespace", failedJob.Namespace, "failedJob", failedJob.Name)
+	return unlockJob, nil
+}
+
+func (r *VolSyncMonitorReconciler) buildUnlockJobSpec(monitor *volsyncv1alpha1.VolSyncMonitor, failedJob batchv1.Job, unlockJobName, lockError string) *batchv1.JobSpec {
+	template := monitor.Spec.UnlockJobTemplate
+	
+	// Default values
+	if len(template.Command) == 0 {
+		template.Command = []string{"/bin/sh"}
+	}
+	if len(template.Args) == 0 {
+		template.Args = []string{"-c", "restic unlock"}
+	}
+
+	// Build container spec
+	container := corev1.Container{
+		Name:    "unlock",
+		Image:   template.Image,
+		Command: template.Command,
+		Args:    template.Args,
+		Env: []corev1.EnvVar{
+			{
+				Name:  "FAILED_JOB_NAME",
+				Value: failedJob.Name,
+			},
+			{
+				Name:  "LOCK_ERROR",
+				Value: lockError,
 			},
 		},
 	}
 
-	// Set security context if provided
-	if monitor.Spec.UnlockJobTemplate.SecurityContext != nil {
-		sc := monitor.Spec.UnlockJobTemplate.SecurityContext
-		job.Spec.Template.Spec.SecurityContext = &corev1.PodSecurityContext{
-			RunAsUser:  sc.RunAsUser,
-			RunAsGroup: sc.RunAsGroup,
-			FSGroup:    sc.FSGroup,
+	// Add resource requirements if specified
+	if template.Resources != nil {
+		container.Resources = corev1.ResourceRequirements{}
+		if template.Resources.Limits != nil {
+			container.Resources.Limits = make(corev1.ResourceList)
+			for k, v := range template.Resources.Limits {
+				container.Resources.Limits[corev1.ResourceName(k)] = resource.MustParse(v)
+			}
+		}
+		if template.Resources.Requests != nil {
+			container.Resources.Requests = make(corev1.ResourceList)
+			for k, v := range template.Resources.Requests {
+				container.Resources.Requests[corev1.ResourceName(k)] = resource.MustParse(v)
+			}
 		}
 	}
 
-	// Set service account if provided
-	if monitor.Spec.UnlockJobTemplate.ServiceAccount != "" {
-		job.Spec.Template.Spec.ServiceAccountName = monitor.Spec.UnlockJobTemplate.ServiceAccount
+	// Build pod spec
+	podSpec := corev1.PodSpec{
+		RestartPolicy: corev1.RestartPolicyNever,
+		Containers:    []corev1.Container{container},
 	}
 
-	// Set owner reference
-	if err := controllerutil.SetControllerReference(monitor, job, r.Scheme); err != nil {
-		return fmt.Errorf("failed to set controller reference: %w", err)
+	// Add service account if specified
+	if template.ServiceAccount != "" {
+		podSpec.ServiceAccountName = template.ServiceAccount
 	}
 
-	if err := r.Create(ctx, job); err != nil {
-		return fmt.Errorf("failed to create job: %w", err)
+	// Add security context if specified
+	if template.SecurityContext != nil {
+		podSpec.SecurityContext = &corev1.PodSecurityContext{
+			RunAsUser:  template.SecurityContext.RunAsUser,
+			RunAsGroup: template.SecurityContext.RunAsGroup,
+			FSGroup:    template.SecurityContext.FSGroup,
+		}
 	}
 
-	logger.Info("Successfully created unlock job", "jobName", jobName, "appName", appName, "objectName", objectName)
+	// Build job spec
+	jobSpec := &batchv1.JobSpec{
+		Template: corev1.PodTemplateSpec{
+			ObjectMeta: metav1.ObjectMeta{
+				Labels: map[string]string{
+					"app.kubernetes.io/name":      "homelab-assistant",
+					"app.kubernetes.io/component": "volsync-unlock",
+					"homelab.rafaribe.com/unlock-job": unlockJobName,
+				},
+			},
+			Spec: podSpec,
+		},
+		BackoffLimit: helpers.Int32Ptr(3),
+	}
+
+	// Add TTL if specified
+	if monitor.Spec.TTLSecondsAfterFinished != nil {
+		jobSpec.TTLSecondsAfterFinished = monitor.Spec.TTLSecondsAfterFinished
+	}
+
+	return jobSpec
+}
+
+func (r *VolSyncMonitorReconciler) removeFailedJob(ctx context.Context, job batchv1.Job) error {
+	// Delete the job with propagation policy to clean up pods
+	deletePolicy := metav1.DeletePropagationForeground
+	deleteOptions := &client.DeleteOptions{
+		PropagationPolicy: &deletePolicy,
+	}
+
+	return r.Delete(ctx, &job, deleteOptions)
+}
+
+func (r *VolSyncMonitorReconciler) updateActiveUnlocks(ctx context.Context, monitor *volsyncv1alpha1.VolSyncMonitor) error {
+	var activeUnlocks []volsyncv1alpha1.ActiveUnlock
+
+	// Find all unlock jobs created by this monitor
+	var jobList batchv1.JobList
+	listOpts := []client.ListOption{
+		client.MatchingLabels{"homelab.rafaribe.com/monitor": monitor.Name},
+	}
+
+	if err := r.List(ctx, &jobList, listOpts...); err != nil {
+		return fmt.Errorf("failed to list unlock jobs: %w", err)
+	}
+
+	// Check status of each unlock job
+	for _, job := range jobList.Items {
+		if r.isJobActive(job) {
+			failedJobName := job.Labels["homelab.rafaribe.com/failed-job"]
+			if failedJobName == "" {
+				failedJobName = job.Annotations["homelab.rafaribe.com/failed-job"]
+			}
+
+			activeUnlock := volsyncv1alpha1.ActiveUnlock{
+				AppName:          r.extractAppName(failedJobName),
+				Namespace:        job.Namespace,
+				ObjectName:       failedJobName,
+				JobName:          job.Name,
+				StartTime:        job.CreationTimestamp,
+				AlertFingerprint: fmt.Sprintf("%s-%s", job.Namespace, job.Name),
+			}
+			activeUnlocks = append(activeUnlocks, activeUnlock)
+		} else if r.isJobSucceeded(job) {
+			monitor.Status.TotalUnlocksSucceeded++
+		} else if r.isJobFailed(job) {
+			monitor.Status.TotalUnlocksFailed++
+		}
+	}
+
+	monitor.Status.ActiveUnlocks = activeUnlocks
 	return nil
 }
 
-func (r *VolSyncMonitorReconciler) buildResticEnvVars(ctx context.Context, appName, namespace, objectName string) ([]corev1.EnvVar, error) {
-	// Try different secret naming patterns that VolSync might use
-	secretNames := []string{
-		fmt.Sprintf("%s-volsync-nfs", appName),   // Pattern from your example
-		fmt.Sprintf("%s-restic-secret", appName), // Common pattern
-		fmt.Sprintf("%s-volsync", appName),       // Alternative pattern
-		fmt.Sprintf("%s-secret", objectName),     // Object-based naming
-	}
-
-	var secretName string
-	for _, name := range secretNames {
-		secret := &corev1.Secret{}
-		err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, secret)
-		if err == nil {
-			secretName = name
-			break
-		}
-	}
-
-	if secretName == "" {
-		return nil, fmt.Errorf("could not find restic secret for app %s in namespace %s", appName, namespace)
-	}
-
-	// Build comprehensive environment variables (same as VolSync uses)
-	envVars := []corev1.EnvVar{
-		{
-			Name: "RESTIC_REPOSITORY",
-			ValueFrom: &corev1.EnvVarSource{
-				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
-					Key:                  "RESTIC_REPOSITORY",
-				},
-			},
-		},
-		{
-			Name: "RESTIC_PASSWORD",
-			ValueFrom: &corev1.EnvVarSource{
-				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
-					Key:                  "RESTIC_PASSWORD",
-				},
-			},
-		},
-	}
-
-	// Add all the optional environment variables that VolSync supports
-	optionalEnvVars := []string{
-		"RESTIC_COMPRESSION", "RESTIC_PACK_SIZE", "RESTIC_READ_CONCURRENCY",
-		"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_DEFAULT_REGION", "AWS_PROFILE",
-		"RESTIC_AWS_ASSUME_ROLE_ARN", "RESTIC_AWS_ASSUME_ROLE_SESSION_NAME", "RESTIC_AWS_ASSUME_ROLE_EXTERNAL_ID",
-		"RESTIC_AWS_ASSUME_ROLE_POLICY", "RESTIC_AWS_ASSUME_ROLE_REGION", "RESTIC_AWS_ASSUME_ROLE_STS_ENDPOINT",
-		"ST_AUTH", "ST_USER", "ST_KEY",
-		"OS_AUTH_URL", "OS_REGION_NAME", "OS_USERNAME", "OS_USER_ID", "OS_PASSWORD",
-		"OS_TENANT_ID", "OS_TENANT_NAME", "OS_USER_DOMAIN_NAME", "OS_USER_DOMAIN_ID",
-		"OS_PROJECT_NAME", "OS_PROJECT_DOMAIN_NAME", "OS_PROJECT_DOMAIN_ID", "OS_TRUST_ID",
-		"OS_APPLICATION_CREDENTIAL_ID", "OS_APPLICATION_CREDENTIAL_NAME", "OS_APPLICATION_CREDENTIAL_SECRET",
-		"OS_STORAGE_URL", "OS_AUTH_TOKEN",
-		"B2_ACCOUNT_ID", "B2_ACCOUNT_KEY",
-		"AZURE_ACCOUNT_NAME", "AZURE_ACCOUNT_KEY", "AZURE_ACCOUNT_SAS", "AZURE_ENDPOINT_SUFFIX",
-		"GOOGLE_PROJECT_ID",
-		"RESTIC_REST_USERNAME", "RESTIC_REST_PASSWORD",
-	}
-
-	optional := true
-	for _, envVar := range optionalEnvVars {
-		envVars = append(envVars, corev1.EnvVar{
-			Name: envVar,
-			ValueFrom: &corev1.EnvVarSource{
-				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
-					Key:                  envVar,
-					Optional:             &optional,
-				},
-			},
-		})
-	}
-
-	return envVars, nil
+func (r *VolSyncMonitorReconciler) isJobActive(job batchv1.Job) bool {
+	return job.Status.Active > 0
 }
 
-func (r *VolSyncMonitorReconciler) discoverVolSyncVolumeConfig(ctx context.Context, failedJob *batchv1.Job) ([]corev1.Volume, []corev1.VolumeMount, error) {
-	logger := log.FromContext(ctx)
-
-	// Extract volumes and volume mounts from the failed job
-	var volumes []corev1.Volume
-	var volumeMounts []corev1.VolumeMount
-
-	// Look for repository-related volumes (typically named "repository")
-	for _, volume := range failedJob.Spec.Template.Spec.Volumes {
-		if volume.Name == "repository" {
-			volumes = append(volumes, volume)
-			break
+func (r *VolSyncMonitorReconciler) isJobSucceeded(job batchv1.Job) bool {
+	for _, condition := range job.Status.Conditions {
+		if condition.Type == batchv1.JobComplete && condition.Status == corev1.ConditionTrue {
+			return true
 		}
 	}
-
-	// Look for repository-related volume mounts
-	if len(failedJob.Spec.Template.Spec.Containers) > 0 {
-		for _, mount := range failedJob.Spec.Template.Spec.Containers[0].VolumeMounts {
-			if mount.Name == "repository" {
-				volumeMounts = append(volumeMounts, mount)
-				break
-			}
-		}
-	}
-
-	logger.Info("Discovered VolSync volume configuration from failed job",
-		"volumes", len(volumes),
-		"volumeMounts", len(volumeMounts),
-		"failedJob", failedJob.Name)
-
-	return volumes, volumeMounts, nil
-}
-func (r *VolSyncMonitorReconciler) getResourceLimits(resources *volsyncv1alpha1.ResourceRequirements) map[string]string {
-	if resources == nil {
-		return nil
-	}
-	return resources.Limits
+	return false
 }
 
-func (r *VolSyncMonitorReconciler) getResourceRequests(resources *volsyncv1alpha1.ResourceRequirements) map[string]string {
-	if resources == nil {
-		return nil
+func (r *VolSyncMonitorReconciler) extractAppName(jobName string) string {
+	// Extract app name from job name (e.g., "volsync-prowlarr-backup" -> "prowlarr")
+	parts := strings.Split(jobName, "-")
+	if len(parts) >= 2 && parts[0] == "volsync" {
+		return parts[1]
 	}
-	return resources.Requests
+	return jobName
 }
 
-func (r *VolSyncMonitorReconciler) convertResources(resources map[string]string) corev1.ResourceList {
-	if resources == nil {
-		return nil
+func (r *VolSyncMonitorReconciler) cleanupProcessedJobs(monitor *volsyncv1alpha1.VolSyncMonitor) {
+	// Keep only the last 50 processed jobs
+	if len(monitor.Status.ProcessedJobs) > 50 {
+		monitor.Status.ProcessedJobs = monitor.Status.ProcessedJobs[len(monitor.Status.ProcessedJobs)-50:]
 	}
-
-	result := make(corev1.ResourceList)
-	for k, v := range resources {
-		if quantity, err := resource.ParseQuantity(v); err == nil {
-			result[corev1.ResourceName(k)] = quantity
-		}
-	}
-	return result
-}
-
-func (r *VolSyncMonitorReconciler) handleDeletion(ctx context.Context, monitor *volsyncv1alpha1.VolSyncMonitor) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-	logger.Info("Handling VolSyncMonitor deletion")
-
-	// Clean up any remaining jobs
-	jobList := &batchv1.JobList{}
-	err := r.List(ctx, jobList, client.InNamespace(monitor.Namespace), client.MatchingLabels{
-		"homelab.rafaribe.com/monitor": monitor.Name,
-	})
-	if err != nil {
-		logger.Error(err, "Failed to list jobs for cleanup")
-	} else {
-		for _, job := range jobList.Items {
-			if err := r.Delete(ctx, &job); err != nil && !errors.IsNotFound(err) {
-				logger.Error(err, "Failed to delete job", "job", job.Name)
-			}
-		}
-	}
-
-	// Remove finalizer
-	controllerutil.RemoveFinalizer(monitor, "homelab.rafaribe.com/finalizer")
-	return ctrl.Result{}, r.Update(ctx, monitor)
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -629,8 +518,52 @@ func (r *VolSyncMonitorReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&volsyncv1alpha1.VolSyncMonitor{}).
 		Watches(
 			&batchv1.Job{},
-			&handler.EnqueueRequestForObject{},
+			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []ctrl.Request {
+				return r.findVolSyncMonitorsForJob(ctx, obj)
+			}),
 		).
-		Owns(&batchv1.Job{}).
 		Complete(r)
+}
+
+// findVolSyncMonitorsForJob finds VolSyncMonitors that should be triggered by job events
+func (r *VolSyncMonitorReconciler) findVolSyncMonitorsForJob(ctx context.Context, obj client.Object) []ctrl.Request {
+	job, ok := obj.(*batchv1.Job)
+	if !ok {
+		return nil
+	}
+
+	// Only trigger for failed VolSync jobs
+	if !strings.HasPrefix(job.Name, "volsync-") || !r.isJobFailed(*job) {
+		return nil
+	}
+
+	// Find all VolSyncMonitors in the cluster
+	var monitorList volsyncv1alpha1.VolSyncMonitorList
+	if err := r.List(ctx, &monitorList); err != nil {
+		return nil
+	}
+
+	var requests []ctrl.Request
+	for _, monitor := range monitorList.Items {
+		// Check if this monitor should handle this job
+		if r.shouldMonitorHandleJob(monitor, *job) {
+			requests = append(requests, ctrl.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      monitor.Name,
+					Namespace: monitor.Namespace,
+				},
+			})
+		}
+	}
+
+	return requests
+}
+
+func (r *VolSyncMonitorReconciler) shouldMonitorHandleJob(monitor volsyncv1alpha1.VolSyncMonitor, job batchv1.Job) bool {
+	if !monitor.Spec.Enabled {
+		return false
+	}
+
+	// Check if job matches the monitor's selector
+	return r.matchesJobSelector(job, monitor.Spec.JobSelector)
 }

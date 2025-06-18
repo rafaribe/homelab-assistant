@@ -1,4 +1,4 @@
 ## Append samples of your project ##
 resources:
-- volsync_v1alpha1_volsyncunlock.yaml
+- volsync_v1alpha1_volsyncmonitor.yaml
 #+kubebuilder:scaffold:manifestskustomizesamples

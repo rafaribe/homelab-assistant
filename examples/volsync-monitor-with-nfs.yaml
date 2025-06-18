@@ -1,0 +1,136 @@
+apiVersion: homelab.rafaribe.com/v1alpha1
+kind: VolSyncMonitor
+metadata:
+  name: volsync-monitor-nfs
+  namespace: homelab-assistant-system
+spec:
+  enabled: true
+  removeFailedJobs: true
+  
+  # Monitor only specific namespaces
+  jobSelector:
+    namePrefix: "volsync-"
+    namespaces:
+      - media
+      - home-automation
+      - default
+  
+  unlockJobTemplate:
+    image: "restic/restic:latest"
+    command: ["/bin/sh"]
+    args:
+      - "-c"
+      - |
+        set -e
+        echo "=== VolSync Repository Unlock ==="
+        echo "Failed job: $FAILED_JOB_NAME"
+        echo "Lock error: $LOCK_ERROR"
+        echo "Repository path: $RESTIC_REPOSITORY"
+        
+        # Check if repository exists
+        if [ ! -d "$RESTIC_REPOSITORY" ]; then
+          echo "ERROR: Repository directory not found: $RESTIC_REPOSITORY"
+          exit 1
+        fi
+        
+        # Unlock the repository
+        echo "Unlocking repository..."
+        restic unlock
+        
+        # Verify unlock was successful
+        echo "Verifying repository status..."
+        restic snapshots --last 1 > /dev/null 2>&1 || {
+          echo "WARNING: Repository may still have issues"
+          exit 1
+        }
+        
+        echo "✅ Repository unlocked successfully!"
+    
+    # Environment variables for restic
+    env:
+      - name: RESTIC_REPOSITORY
+        value: "/mnt/backup-repo"
+      - name: RESTIC_PASSWORD_FILE
+        value: "/secrets/restic-password"
+    
+    # Volume mounts for NFS and secrets
+    volumeMounts:
+      - name: backup-repo
+        mountPath: /mnt/backup-repo
+      - name: restic-secrets
+        mountPath: /secrets
+        readOnly: true
+    
+    # Pod-level volumes
+    volumes:
+      - name: backup-repo
+        nfs:
+          server: "nas.local"
+          path: "/volume1/backups/restic"
+      - name: restic-secrets
+        secret:
+          secretName: restic-credentials
+    
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "256Mi"
+        cpu: "500m"
+    
+    securityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+    
+    serviceAccount: volsync-unlock
+  
+  ttlSecondsAfterFinished: 7200  # 2 hours
+  maxConcurrentUnlocks: 2
+
+---
+# Secret containing restic credentials
+apiVersion: v1
+kind: Secret
+metadata:
+  name: restic-credentials
+  namespace: homelab-assistant-system
+type: Opaque
+data:
+  # echo -n "your-restic-password" | base64
+  restic-password: eW91ci1yZXN0aWMtcGFzc3dvcmQ=
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: volsync-unlock
+  namespace: homelab-assistant-system
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: volsync-unlock-nfs
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["persistentvolumes", "persistentvolumeclaims"]
+  verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: volsync-unlock-nfs
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: volsync-unlock-nfs
+subjects:
+- kind: ServiceAccount
+  name: volsync-unlock
+  namespace: homelab-assistant-system

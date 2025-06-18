@@ -34,16 +34,6 @@ func TestSchemeSetup(t *testing.T) {
 	if _, ok := obj.(*volsyncv1alpha1.VolSyncMonitor); !ok {
 		t.Errorf("Created object is not a VolSyncMonitor")
 	}
-
-	gvkUnlock := volsyncv1alpha1.GroupVersion.WithKind("VolSyncUnlock")
-	objUnlock, err := scheme.New(gvkUnlock)
-	if err != nil {
-		t.Errorf("Failed to create VolSyncUnlock from scheme: %v", err)
-	}
-
-	if _, ok := objUnlock.(*volsyncv1alpha1.VolSyncUnlock); !ok {
-		t.Errorf("Created object is not a VolSyncUnlock")
-	}
 }
 
 func TestManagerConfiguration(t *testing.T) {

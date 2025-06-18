@@ -1,0 +1,105 @@
+apiVersion: homelab.rafaribe.com/v1alpha1
+kind: VolSyncMonitor
+metadata:
+  name: volsync-monitor
+  namespace: homelab-assistant-system
+spec:
+  # Enable the monitor
+  enabled: true
+  
+  # Remove failed jobs after creating unlock jobs
+  removeFailedJobs: true
+  
+  # Job selector configuration
+  jobSelector:
+    # Monitor jobs with "volsync-" prefix (default)
+    namePrefix: "volsync-"
+    # Optional: monitor specific namespaces only
+    # namespaces:
+    #   - default
+    #   - media
+    #   - home-automation
+    # Optional: additional label selector
+    # labelSelector:
+    #   app.kubernetes.io/name: volsync
+  
+  # Custom lock error patterns (optional - defaults provided)
+  lockErrorPatterns:
+    - "repository is already locked"
+    - "unable to create lock"
+    - "repository.*locked"
+    - "lock.*already exists"
+    - "Fatal: unable to create lock.*repository is already locked"
+  
+  # Unlock job template
+  unlockJobTemplate:
+    image: "restic/restic:latest"
+    command: ["/bin/sh"]
+    args: 
+      - "-c"
+      - |
+        echo "Unlocking repository for failed job: $FAILED_JOB_NAME"
+        echo "Lock error was: $LOCK_ERROR"
+        
+        # Add your restic unlock logic here
+        # This example assumes environment variables are set elsewhere
+        restic unlock
+        
+        echo "Repository unlocked successfully"
+    
+    # Resource requirements
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "100m"
+      limits:
+        memory: "128Mi"
+        cpu: "200m"
+    
+    # Security context
+    securityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+    
+    # Optional: service account for accessing secrets
+    # serviceAccount: volsync-unlock
+  
+  # TTL for unlock jobs (cleanup after 1 hour)
+  ttlSecondsAfterFinished: 3600
+  
+  # Maximum concurrent unlock operations
+  maxConcurrentUnlocks: 3
+
+---
+# Example ServiceAccount for unlock jobs (if needed)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: volsync-unlock
+  namespace: homelab-assistant-system
+
+---
+# Example Role for accessing secrets (if needed)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: volsync-unlock
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: volsync-unlock
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: volsync-unlock
+subjects:
+- kind: ServiceAccount
+  name: volsync-unlock
+  namespace: homelab-assistant-system

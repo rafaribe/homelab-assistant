@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.13.0
+    controller-gen.kubebuilder.io/version: v0.18.0
   name: volsyncmonitors.homelab.rafaribe.com
 spec:
   group: homelab.rafaribe.com
@@ -18,14 +18,14 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
-    - jsonPath: .status.lastCheckTime
-      name: Last Check
-      type: date
     - jsonPath: .status.activeUnlocks
       name: Active Unlocks
       type: integer
     - jsonPath: .status.totalUnlocksCreated
       name: Total Created
+      type: integer
+    - jsonPath: .status.totalFailedJobsRemoved
+      name: Jobs Removed
       type: integer
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -36,14 +36,19 @@ spec:
         description: VolSyncMonitor is the Schema for the volsyncmonitors API
         properties:
           apiVersion:
-            description: 'APIVersion defines the versioned schema of this representation
-              of an object. Servers should convert recognized schemas to the latest
-              internal version, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
             type: string
           kind:
-            description: 'Kind is a string value representing the REST resource this
-              object represents. Servers may infer this from the endpoint the client
-              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
             type: string
           metadata:
             type: object
@@ -53,13 +58,45 @@ spec:
               enabled:
                 description: Enabled controls whether the monitor is active
                 type: boolean
+              jobSelector:
+                description: |-
+                  JobSelector defines how to identify VolSync jobs to monitor
+                  If not specified, monitors all jobs with "volsync-" prefix
+                properties:
+                  labelSelector:
+                    additionalProperties:
+                      type: string
+                    description: LabelSelector filters jobs by labels
+                    type: object
+                  namePrefix:
+                    description: 'NamePrefix filters jobs by name prefix (default:
+                      "volsync-")'
+                    type: string
+                  namespaces:
+                    description: Namespaces to monitor (if empty, monitors all namespaces)
+                    items:
+                      type: string
+                    type: array
+                type: object
+              lockErrorPatterns:
+                description: |-
+                  LockErrorPatterns are regex patterns to match in job logs that indicate lock issues
+                  Default patterns will be used if not specified
+                items:
+                  type: string
+                type: array
               maxConcurrentUnlocks:
-                description: MaxConcurrentUnlocks limits the number of concurrent unlock
-                  operations
+                description: MaxConcurrentUnlocks limits the number of concurrent
+                  unlock operations
                 format: int32
                 type: integer
+              removeFailedJobs:
+                description: RemoveFailedJobs controls whether to remove failed VolSync
+                  jobs after creating unlock jobs
+                type: boolean
               ttlSecondsAfterFinished:
-                description: TTLSecondsAfterFinished specifies the TTL for unlock jobs
+                description: TTLSecondsAfterFinished specifies the TTL for unlock
+                  jobs
                 format: int32
                 type: integer
               unlockJobTemplate:
@@ -78,62 +115,6 @@ spec:
                   image:
                     description: Image is the container image to use for unlock jobs
                     type: string
-                  repositoryMount:
-                    description: RepositoryMount defines how to mount the restic repository
-                    properties:
-                      hostPath:
-                        description: HostPath configuration (when type is "hostPath")
-                        properties:
-                          path:
-                            description: Path on the host
-                            type: string
-                          readOnly:
-                            description: ReadOnly specifies if the mount should be read-only
-                            type: boolean
-                          type:
-                            description: Type of hostPath
-                            type: string
-                        required:
-                        - path
-                        type: object
-                      mountPath:
-                        description: MountPath is where to mount the repository in the
-                          container
-                        type: string
-                      nfs:
-                        description: NFS configuration (when type is "nfs")
-                        properties:
-                          path:
-                            description: Path is the path on the NFS server
-                            type: string
-                          readOnly:
-                            description: ReadOnly specifies if the mount should be read-only
-                            type: boolean
-                          server:
-                            description: Server is the NFS server hostname or IP
-                            type: string
-                        required:
-                        - path
-                        - server
-                        type: object
-                      pvc:
-                        description: PVC configuration (when type is "pvc")
-                        properties:
-                          claimName:
-                            description: ClaimName is the name of the PVC
-                            type: string
-                          readOnly:
-                            description: ReadOnly specifies if the mount should be read-only
-                            type: boolean
-                        required:
-                        - claimName
-                        type: object
-                      type:
-                        description: Type of mount (nfs, pvc, hostPath, etc.)
-                        type: string
-                    required:
-                    - type
-                    type: object
                   resources:
                     description: Resources defines resource requirements for unlock
                       jobs
@@ -219,43 +200,35 @@ spec:
               conditions:
                 description: Conditions represent the latest available observations
                 items:
-                  description: "Condition contains details for one aspect of the current
-                    state of this API Resource. --- This struct is intended for direct
-                    use as an array at the field path .status.conditions.  For example,
-                    \n type FooStatus struct{ // Represents the observations of a
-                    foo's current state. // Known .status.conditions.type are: \"Available\",
-                    \"Progressing\", and \"Degraded\" // +patchMergeKey=type // +patchStrategy=merge
-                    // +listType=map // +listMapKey=type Conditions []metav1.Condition
-                    `json:\"conditions,omitempty\" patchStrategy:\"merge\" patchMergeKey:\"type\"
-                    protobuf:\"bytes,1,rep,name=conditions\"` \n // other fields }"
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
                   properties:
                     lastTransitionTime:
-                      description: lastTransitionTime is the last time the condition
-                        transitioned from one status to another. This should be when
-                        the underlying condition changed.  If that is not known, then
-                        using the time when the API field changed is acceptable.
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
                       format: date-time
                       type: string
                     message:
-                      description: message is a human readable message indicating
-                        details about the transition. This may be an empty string.
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
                       maxLength: 32768
                       type: string
                     observedGeneration:
-                      description: observedGeneration represents the .metadata.generation
-                        that the condition was set based upon. For instance, if .metadata.generation
-                        is currently 12, but the .status.conditions[x].observedGeneration
-                        is 9, the condition is out of date with respect to the current
-                        state of the instance.
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
                       format: int64
                       minimum: 0
                       type: integer
                     reason:
-                      description: reason contains a programmatic identifier indicating
-                        the reason for the condition's last transition. Producers
-                        of specific condition types may define expected values and
-                        meanings for this field, and whether the values are considered
-                        a guaranteed API. The value should be a CamelCase string.
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
                         This field may not be empty.
                       maxLength: 1024
                       minLength: 1
@@ -270,10 +243,6 @@ spec:
                       type: string
                     type:
                       description: type of condition in CamelCase or in foo.example.com/CamelCase.
-                        --- Many .condition.type values are consistent across resources
-                        like Available, but because arbitrary conditions can be useful
-                        (see .node.status.conditions), the ability to deconflict is
-                        important. The regex it matches is (dns1123SubdomainFmt/)?(qualifiedNameFmt)
                       maxLength: 316
                       pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
                       type: string
@@ -285,19 +254,79 @@ spec:
                   - type
                   type: object
                 type: array
-              lastCheckTime:
-                description: LastCheckTime is when the monitor last checked for alerts
-                format: date-time
-                type: string
               lastError:
                 description: LastError contains the last error encountered
                 type: string
+              lastUnlockTime:
+                description: LastUnlockTime is the timestamp of the last unlock operation
+                format: date-time
+                type: string
+              observedGeneration:
+                description: ObservedGeneration is the last generation observed by
+                  the controller
+                format: int64
+                type: integer
               phase:
                 description: Phase represents the current phase of the monitor
                 type: string
+              processedJobs:
+                description: ProcessedJobs tracks jobs that have been processed (failed
+                  jobs that were handled)
+                items:
+                  description: ProcessedJob represents a failed job that was processed
+                  properties:
+                    jobName:
+                      description: JobName is the name of the failed job
+                      type: string
+                    lockError:
+                      description: LockError is the lock error that was detected
+                      type: string
+                    namespace:
+                      description: Namespace is the namespace of the failed job
+                      type: string
+                    processedTime:
+                      description: ProcessedTime is when the job was processed
+                      format: date-time
+                      type: string
+                    removed:
+                      description: Removed indicates if the failed job was removed
+                      type: boolean
+                    unlockJobName:
+                      description: UnlockJobName is the name of the unlock job created
+                        for this failed job
+                      type: string
+                  required:
+                  - jobName
+                  - lockError
+                  - namespace
+                  - processedTime
+                  - removed
+                  - unlockJobName
+                  type: object
+                type: array
+              totalFailedJobsRemoved:
+                description: TotalFailedJobsRemoved is the total number of failed
+                  jobs removed
+                format: int32
+                type: integer
+              totalLockErrorsDetected:
+                description: TotalLockErrorsDetected is the total number of lock errors
+                  detected
+                format: int32
+                type: integer
               totalUnlocksCreated:
                 description: TotalUnlocksCreated is the total number of unlock jobs
                   created
+                format: int32
+                type: integer
+              totalUnlocksFailed:
+                description: TotalUnlocksFailed is the total number of unlock jobs
+                  that failed
+                format: int32
+                type: integer
+              totalUnlocksSucceeded:
+                description: TotalUnlocksSucceeded is the total number of unlock jobs
+                  that succeeded
                 format: int32
                 type: integer
             type: object

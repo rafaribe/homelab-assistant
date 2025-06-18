@@ -41,6 +41,30 @@ type VolSyncMonitorSpec struct {
 	// Default patterns will be used if not specified
 	// +optional
 	LockErrorPatterns []string `json:"lockErrorPatterns,omitempty"`
+
+	// RemoveFailedJobs controls whether to remove failed VolSync jobs after creating unlock jobs
+	// +optional
+	RemoveFailedJobs bool `json:"removeFailedJobs,omitempty"`
+
+	// JobSelector defines how to identify VolSync jobs to monitor
+	// If not specified, monitors all jobs with "volsync-" prefix
+	// +optional
+	JobSelector *JobSelector `json:"jobSelector,omitempty"`
+}
+
+// JobSelector defines how to select jobs to monitor
+type JobSelector struct {
+	// NamePrefix filters jobs by name prefix (default: "volsync-")
+	// +optional
+	NamePrefix string `json:"namePrefix,omitempty"`
+
+	// LabelSelector filters jobs by labels
+	// +optional
+	LabelSelector map[string]string `json:"labelSelector,omitempty"`
+
+	// Namespaces to monitor (if empty, monitors all namespaces)
+	// +optional
+	Namespaces []string `json:"namespaces,omitempty"`
 }
 
 // UnlockJobTemplate defines the template for creating unlock jobs
@@ -75,6 +99,10 @@ type VolSyncMonitorStatus struct {
 	// +optional
 	ActiveUnlocks []ActiveUnlock `json:"activeUnlocks,omitempty"`
 
+	// ProcessedJobs tracks jobs that have been processed (failed jobs that were handled)
+	// +optional
+	ProcessedJobs []ProcessedJob `json:"processedJobs,omitempty"`
+
 	// TotalUnlocksCreated is the total number of unlock jobs created
 	// +optional
 	TotalUnlocksCreated int32 `json:"totalUnlocksCreated,omitempty"`
@@ -90,6 +118,10 @@ type VolSyncMonitorStatus struct {
 	// TotalLockErrorsDetected is the total number of lock errors detected
 	// +optional
 	TotalLockErrorsDetected int32 `json:"totalLockErrorsDetected,omitempty"`
+
+	// TotalFailedJobsRemoved is the total number of failed jobs removed
+	// +optional
+	TotalFailedJobsRemoved int32 `json:"totalFailedJobsRemoved,omitempty"`
 
 	// LastUnlockTime is the timestamp of the last unlock operation
 	// +optional
@@ -110,6 +142,27 @@ type VolSyncMonitorStatus struct {
 	// ObservedGeneration is the last generation observed by the controller
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+}
+
+// ProcessedJob represents a failed job that was processed
+type ProcessedJob struct {
+	// JobName is the name of the failed job
+	JobName string `json:"jobName"`
+
+	// Namespace is the namespace of the failed job
+	Namespace string `json:"namespace"`
+
+	// ProcessedTime is when the job was processed
+	ProcessedTime metav1.Time `json:"processedTime"`
+
+	// UnlockJobName is the name of the unlock job created for this failed job
+	UnlockJobName string `json:"unlockJobName"`
+
+	// Removed indicates if the failed job was removed
+	Removed bool `json:"removed"`
+
+	// LockError is the lock error that was detected
+	LockError string `json:"lockError"`
 }
 
 // ActiveUnlock represents an active unlock operation
@@ -248,6 +301,7 @@ type SecurityContext struct {
 //+kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase"
 //+kubebuilder:printcolumn:name="Active Unlocks",type="integer",JSONPath=".status.activeUnlocks"
 //+kubebuilder:printcolumn:name="Total Created",type="integer",JSONPath=".status.totalUnlocksCreated"
+//+kubebuilder:printcolumn:name="Jobs Removed",type="integer",JSONPath=".status.totalFailedJobsRemoved"
 //+kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // VolSyncMonitor is the Schema for the volsyncmonitors API

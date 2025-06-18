@@ -8,14 +8,21 @@ A collection of Kubernetes controllers designed to automate and simplify homelab
 ## 🎯 **Controllers**
 
 ### VolSync Monitor Controller
-Automatically detects and resolves restic repository lock issues in VolSync backup jobs.
+Provides complete automated handling of failed VolSync backup jobs with repository lock issues.
 
-**Features:**
-- 🔍 **Smart Detection**: Monitors VolSync jobs for lock errors using configurable regex patterns
-- 🔓 **Auto-Unlock**: Creates unlock jobs when lock errors are detected
-- 📊 **Prometheus Metrics**: Comprehensive metrics for monitoring and alerting
-- ⚙️ **Configurable**: Customizable unlock job templates and error patterns
-- 🛡️ **Secure**: Follows Kubernetes security best practices
+**Complete Workflow:**
+- 🔍 **Continuous Monitoring**: Watches all VolSync jobs across namespaces
+- 🚨 **Failure Detection**: Automatically identifies failed VolSync jobs
+- 🔓 **Lock Error Analysis**: Scans pod logs for repository lock error patterns
+- ⚡ **Auto-Unlock**: Creates restic unlock jobs when lock errors are detected
+- 🧹 **Job Cleanup**: Optionally removes failed jobs after processing
+- 📊 **Status Tracking**: Comprehensive monitoring of all operations
+
+**Single Controller Benefits:**
+- **One CR to Rule Them All**: Single VolSyncMonitor handles the entire workflow
+- **No Manual Intervention**: Fully automated from detection to cleanup
+- **Configurable**: Customizable job selectors, error patterns, and cleanup behavior
+- **Observable**: Rich status tracking and Prometheus metrics
 
 ### Future Controllers
 - **Backup Controller**: Automated backup management and scheduling

@@ -2,11 +2,26 @@
 
 ## Overview
 
-The VolSync Monitor Controller automatically monitors VolSync jobs for failures and creates restic unlock jobs when repository lock issues are detected. This eliminates the need for manual intervention when VolSync repositories become locked, such as when running `task volsync:unlock cluster=main ns=downloads app=prowlarr`.
+The VolSync Monitor Controller provides a complete automated solution for handling failed VolSync backup jobs with repository lock issues. It monitors all VolSync jobs, detects lock errors in failed jobs, creates unlock jobs, and optionally removes the failed jobs - all with a single Custom Resource.
 
-## How It Works
+## Complete Workflow
 
-1. **Job Monitoring**: The controller watches all Kubernetes Jobs and identifies VolSync jobs by their labels (`app.kubernetes.io/created-by: volsync`) or name patterns (`volsync-src-*`, `volsync-dst-*`)
+1. **Continuous Monitoring**: Watches all VolSync jobs across specified namespaces
+2. **Failure Detection**: Identifies failed VolSync jobs automatically  
+3. **Lock Error Analysis**: Scans pod logs for repository lock error patterns
+4. **Unlock Job Creation**: Creates restic unlock jobs when lock errors are detected
+5. **Failed Job Cleanup**: Optionally removes failed jobs after creating unlock jobs
+6. **Status Tracking**: Maintains comprehensive status of all operations
+
+## Key Features
+
+- **Single Controller**: One VolSyncMonitor CR handles the entire workflow
+- **Automatic Detection**: No manual intervention required
+- **Configurable Patterns**: Customizable lock error detection patterns
+- **Job Cleanup**: Optional removal of failed jobs after processing
+- **Comprehensive Monitoring**: Tracks active unlocks, success/failure rates, and processed jobs
+- **Namespace Scoping**: Monitor specific namespaces or all namespaces
+- **Resource Management**: Configurable resource limits and TTL for unlock jobs
 
 2. **Failure Detection**: When a VolSync job fails, the controller examines the failed job's pod status and container termination messages
 
