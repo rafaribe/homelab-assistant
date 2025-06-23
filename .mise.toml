@@ -13,6 +13,8 @@ kubectl = "latest"
 kustomize = "latest"
 # Controller testing tools
 setup-envtest = "latest"  # For controller-runtime tests
+# Semantic versioning
+svu = "latest"
 
 [env]
 # Go environment
@@ -258,6 +260,26 @@ run = [
     "rm -rf charts/homelab-assistant",
     "echo '✅ Main chart removed. Only CRDs chart remains.'",
 ]
+
+[tasks.chart-version-show]
+description = "Show current and next versions using svu"
+run = "make chart-version-show"
+
+[tasks.chart-version-update]
+description = "Update Chart.yaml with next semantic version"
+run = "make chart-version-update"
+
+[tasks.chart-release]
+description = "Create a complete chart release with git tag"
+run = "make chart-release"
+
+[tasks.chart-release-push]
+description = "Create release and push to git and OCI registry"
+run = "make chart-release-push"
+
+[tasks.chart-help]
+description = "Show chart release workflow help"
+run = "make chart-help"
 
 [tasks.coverage-ci]
 description = "Generate coverage report for CI (unit tests only)"

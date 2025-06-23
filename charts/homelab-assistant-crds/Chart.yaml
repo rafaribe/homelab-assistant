@@ -2,8 +2,8 @@ apiVersion: v2
 name: homelab-assistant-crds
 description: Custom Resource Definitions for Homelab Assistant Controllers
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.2.0
+appVersion: "0.2.0"
 home: https://github.com/rafaribe/homelab-assistant
 sources:
   - https://github.com/rafaribe/homelab-assistant

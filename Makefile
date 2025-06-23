@@ -68,7 +68,12 @@ IMG ?= controller:latest
 
 # OCI Registry configuration for Helm charts
 CHART_REGISTRY ?= ghcr.io/rafaribe/charts
-CHART_VERSION ?= $(VERSION)
+CHART_PATH ?= charts/homelab-assistant-crds
+
+# Version management with svu
+CURRENT_CHART_VERSION := $(shell grep '^version:' $(CHART_PATH)/Chart.yaml | cut -d' ' -f2)
+CURRENT_APP_VERSION := $(shell grep '^appVersion:' $(CHART_PATH)/Chart.yaml | cut -d' ' -f2 | tr -d '"')
+NEXT_VERSION := $(shell svu next --tag.prefix=chart-v --tag.mode=all 2>/dev/null || echo "0.2.0")
 
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.28.3
@@ -221,6 +226,27 @@ undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/confi
 
 ##@ Charts
 
+.PHONY: chart-help
+chart-help: ## Show chart release workflow help
+	@echo "Chart Release Workflow (using svu for semantic versioning):"
+	@echo "  make chart-version-show     - Show current and next versions"
+	@echo "  make chart-version-update   - Update Chart.yaml with next semantic version"
+	@echo "  make chart-release          - Create release with git tag"
+	@echo "  make chart-release-push     - Create release and push everything"
+	@echo ""
+	@echo "Individual steps:"
+	@echo "  make update-crds        - Regenerate CRDs and update templates"
+	@echo "  make chart-package      - Package the chart"
+	@echo "  make chart-push-oci     - Push to OCI registry"
+	@echo ""
+	@echo "Prerequisites:"
+	@echo "  go install github.com/caarlos0/svu@latest"
+	@echo ""
+	@echo "Semantic versioning based on conventional commits:"
+	@echo "  feat: ... (minor version bump)"
+	@echo "  fix: ...  (patch version bump)"
+	@echo "  BREAKING CHANGE: ... (major version bump)"
+
 .PHONY: chart-test
 chart-test: ## Run helm chart tests
 	@echo "Installing helm unittest plugin..."
@@ -297,11 +323,48 @@ chart-uninstall-local: ## Uninstall local charts (WARNING: Uses current kubeconf
 	@echo "Uninstalling CRDs..."
 	@helm uninstall homelab-assistant-crds -n homelab-assistant-system || true
 
+.PHONY: svu-check
+svu-check: ## Check if svu is installed
+	@which svu > /dev/null || (echo "❌ svu not found. Install it with: go install github.com/caarlos0/svu@latest" && exit 1)
+	@echo "✅ svu is available"
+
+.PHONY: chart-version-show
+chart-version-show: svu-check ## Show current and next versions
+	@echo "Current chart version: $(CURRENT_CHART_VERSION)"
+	@echo "Current app version: $(CURRENT_APP_VERSION)"
+	@echo "Next version (from svu): $(NEXT_VERSION)"
+	@echo "Latest git tag: $$(git describe --tags --abbrev=0 2>/dev/null || echo 'No tags found')"
+
+.PHONY: chart-version-update
+chart-version-update: svu-check ## Update Chart.yaml with next semantic version
+	@echo "Updating chart version from $(CURRENT_CHART_VERSION) to $(NEXT_VERSION)"
+	@sed -i "s/^version: .*/version: $(NEXT_VERSION)/" $(CHART_PATH)/Chart.yaml
+	@sed -i "s/^appVersion: .*/appVersion: \"$(NEXT_VERSION)\"/" $(CHART_PATH)/Chart.yaml
+	@echo "✅ Chart version updated to $(NEXT_VERSION)"
+
+.PHONY: chart-release
+chart-release: update-crds chart-version-update chart-package ## Create a complete chart release with git tag
+	@echo "Creating release for version: $(NEXT_VERSION)"
+	@git add $(CHART_PATH)/Chart.yaml charts/homelab-assistant-crds/templates/crds.yaml
+	@git commit -m "chore(release): bump homelab-assistant-crds to v$(NEXT_VERSION)"
+	@git tag -a "chart-v$(NEXT_VERSION)" -m "Release homelab-assistant-crds chart v$(NEXT_VERSION)"
+	@echo "✅ Git tag chart-v$(NEXT_VERSION) created"
+	@echo "📦 Chart packaged: dist/homelab-assistant-crds-$(NEXT_VERSION).tgz"
+	@echo "🚀 Ready to push: git push && git push --tags"
+
+.PHONY: chart-release-push
+chart-release-push: chart-release ## Create release and push to git and OCI registry
+	@echo "Pushing git changes and tags..."
+	@git push && git push --tags
+	@echo "Pushing chart to OCI registry..."
+	@helm push dist/homelab-assistant-crds-$(NEXT_VERSION).tgz oci://$(CHART_REGISTRY)
+	@echo "✅ Release v$(NEXT_VERSION) completed and published!"
+
 .PHONY: chart-push-oci
 chart-push-oci: update-crds chart-package ## Push CRDs chart to OCI registry
 	@echo "Pushing homelab-assistant-crds chart to OCI registry..."
 	@helm push dist/homelab-assistant-crds-*.tgz oci://$(CHART_REGISTRY)
-	@echo "Chart pushed successfully to oci://$(CHART_REGISTRY)/homelab-assistant-crds:$(CHART_VERSION)"
+	@echo "Chart pushed successfully to oci://$(CHART_REGISTRY)/homelab-assistant-crds"
 
 .PHONY: chart-remove-main
 chart-remove-main: ## Remove the main homelab-assistant chart (keeping only CRDs)
