@@ -55,8 +55,7 @@ run = "controller-gen object:headerFile=\"hack/boilerplate.go.txt\" paths=\"./..
 
 [tasks.manifests]
 description = "Generate CRDs and RBAC manifests"
-depends = ["install-controller-gen"]
-run = "controller-gen rbac:roleName=manager-role crd webhook paths=\"./...\" output:crd:artifacts:config=config/crd/bases"
+run = "make manifests"
 
 [tasks.fmt]
 description = "Format Go code"
@@ -229,15 +228,7 @@ run = [
 
 [tasks.update-crds]
 description = "Generate CRDs and update Helm chart templates"
-depends = ["manifests"]
-run = [
-    "echo '🔄 Updating CRDs in Helm chart...'",
-    "echo '{{- if .Values.installCRDs }}' > charts/homelab-assistant-crds/templates/crds.yaml",
-    "echo '---' >> charts/homelab-assistant-crds/templates/crds.yaml",
-    "cat config/crd/bases/*.yaml >> charts/homelab-assistant-crds/templates/crds.yaml",
-    "echo '{{- end }}' >> charts/homelab-assistant-crds/templates/crds.yaml",
-    "echo '✅ CRDs updated in Helm chart templates'",
-]
+run = "make update-crds"
 
 [tasks.chart-package]
 description = "Package Helm charts"
