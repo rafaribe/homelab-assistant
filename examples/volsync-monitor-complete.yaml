@@ -2,7 +2,7 @@ apiVersion: homelab.rafaribe.com/v1alpha1
 kind: VolSyncMonitor
 metadata:
   name: volsync-monitor
-  namespace: homelab-assistant-system
+  namespace: system
 spec:
   # Enable the monitor
   enabled: true
