@@ -84,20 +84,11 @@ spec:
   maxConcurrentUnlocks: 3
   ttlSecondsAfterFinished: 3600
   unlockJobTemplate:
+    # Only the image is required - everything else is inherited from the failed job
     image: "quay.io/backube/volsync:0.13.0-rc.2"
+    # Optionally override the default unlock command
     command: ["restic"]
     args: ["unlock", "--remove-all"]
-    resources:
-      limits:
-        cpu: "500m"
-        memory: "512Mi"
-      requests:
-        cpu: "100m"
-        memory: "128Mi"
-    securityContext:
-      runAsUser: 1000
-      runAsGroup: 1000
-      fsGroup: 1000
 ```
 
 ### Advanced Configuration
@@ -114,12 +105,52 @@ spec:
     - "repository.*locked.*by.*another.*process"
     - "timeout.*waiting.*for.*lock"
   
-  # Use different restic image if needed
   unlockJobTemplate:
+    # Use different restic image if needed
     image: "restic/restic:latest"
-    # Service account for additional permissions
+    # Override service account only if needed (otherwise inherits from failed job)
     serviceAccount: "volsync-unlock-sa"
+    # Override security context only if needed (otherwise inherits from failed job)
+    securityContext:
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+    # Set resource limits for unlock jobs (failed jobs don't include resource limits)
+    resources:
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
 ```
+
+## Automatic Configuration Inheritance
+
+The VolSync Monitor automatically inherits configuration from failed jobs, eliminating the need to manually specify:
+
+- **Environment Variables**: All env vars from the failed job container are inherited
+- **Volume Mounts**: All volume mounts are inherited with the same paths and options
+- **Volumes**: All volumes (PVCs, secrets, configmaps, etc.) are inherited
+- **Service Account**: Inherits the service account unless explicitly overridden
+- **Security Context**: Inherits pod and container security context unless overridden
+- **Image Pull Secrets**: Inherits any image pull secrets
+- **Node Selector**: Inherits node selector constraints
+- **Tolerations**: Inherits pod tolerations
+
+This means your unlock jobs will have access to the same:
+- Restic repository credentials
+- SSH keys and certificates
+- Volume mounts for backup data
+- Network policies and security contexts
+- Resource access permissions
+
+### What Gets Added
+
+The unlock job automatically gets these additional environment variables:
+- `FAILED_JOB_NAME`: Name of the job that failed
+- `LOCK_ERROR`: The specific lock error detected
+- `UNLOCK_OPERATION`: Set to "true" to identify unlock operations
 
 ## Secret Discovery
 

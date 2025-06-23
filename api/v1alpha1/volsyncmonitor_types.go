@@ -68,27 +68,35 @@ type JobSelector struct {
 }
 
 // UnlockJobTemplate defines the template for creating unlock jobs
+// Most configuration (env vars, volumes, mounts, service account, security context) 
+// is automatically inherited from the failed job
 type UnlockJobTemplate struct {
 	// Image is the container image to use for unlock jobs
+	// This should typically be the same image as used in your VolSync jobs
 	Image string `json:"image"`
 
 	// Command is the command to run in the unlock job
+	// Defaults to ["/bin/sh"] if not specified
 	// +optional
 	Command []string `json:"command,omitempty"`
 
 	// Args are the arguments to pass to the command
+	// Defaults to ["-c", "restic unlock"] if not specified
 	// +optional
 	Args []string `json:"args,omitempty"`
 
 	// Resources defines resource requirements for unlock jobs
+	// If not specified, no resource limits are set (inherited config doesn't include resources)
 	// +optional
 	Resources *ResourceRequirements `json:"resources,omitempty"`
 
 	// ServiceAccount to use for unlock jobs
+	// If not specified, inherits the service account from the failed job
 	// +optional
 	ServiceAccount string `json:"serviceAccount,omitempty"`
 
-	// SecurityContext for unlock jobs
+	// SecurityContext for unlock jobs  
+	// If not specified, inherits the security context from the failed job
 	// +optional
 	SecurityContext *SecurityContext `json:"securityContext,omitempty"`
 }

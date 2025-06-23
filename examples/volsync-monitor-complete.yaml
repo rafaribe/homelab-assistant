@@ -31,13 +31,96 @@ spec:
     - "lock.*already exists"
     - "Fatal: unable to create lock.*repository is already locked"
   
-  # Unlock job template
+  # Unlock job template - most configuration inherited from failed jobs
   unlockJobTemplate:
+    # Required: container image for unlock operations
     image: "restic/restic:latest"
+    
+    # Optional: customize unlock command (defaults to simple "restic unlock")
     command: ["/bin/sh"]
     args: 
       - "-c"
       - |
+        echo "=== VolSync Repository Unlock ==="
+        echo "Failed job: $FAILED_JOB_NAME"
+        echo "Lock error: $LOCK_ERROR"
+        echo "Timestamp: $(date)"
+        echo
+        
+        # Show repository info
+        echo "Repository info:"
+        restic snapshots --last 1 || echo "Could not list snapshots"
+        echo
+        
+        # Perform unlock with verbose output
+        echo "Unlocking repository..."
+        restic unlock --remove-all --verbose
+        
+        if [ $? -eq 0 ]; then
+          echo "✅ Repository unlocked successfully"
+        else
+          echo "❌ Failed to unlock repository"
+          exit 1
+        fi
+    
+    # Optional: Override service account (otherwise inherits from failed job)
+    # serviceAccount: "volsync-unlock-sa"
+    
+    # Optional: Override security context (otherwise inherits from failed job)
+    # securityContext:
+    #   runAsUser: 1000
+    #   runAsGroup: 1000
+    #   fsGroup: 1000
+    
+    # Optional: Set resource limits (not inherited from failed jobs)
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "256Mi"
+        cpu: "500m"
+  
+  # Limit concurrent unlock operations
+  maxConcurrentUnlocks: 3
+  
+  # Cleanup unlock jobs after 2 hours
+  ttlSecondsAfterFinished: 7200
+
+---
+# What gets automatically inherited from failed jobs:
+# 
+# Environment Variables:
+# - RESTIC_REPOSITORY (repository location)
+# - RESTIC_PASSWORD_FILE or RESTIC_PASSWORD (repository password)
+# - AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY (for S3 backends)
+# - GOOGLE_APPLICATION_CREDENTIALS (for GCS backends)
+# - Any other custom environment variables
+#
+# Volume Mounts:
+# - Repository access (NFS, PVC, etc.)
+# - Credential files and certificates
+# - SSH keys for remote repositories
+# - Any application-specific mounts
+#
+# Volumes:
+# - PersistentVolumeClaims for data access
+# - Secrets containing credentials
+# - ConfigMaps with configuration
+# - Any other volumes from the failed job
+#
+# Pod Configuration:
+# - Service account (with proper RBAC permissions)
+# - Security context (user, group, fsGroup)
+# - Image pull secrets
+# - Node selector constraints
+# - Pod tolerations
+# - DNS configuration
+#
+# Additional Environment Variables Added:
+# - FAILED_JOB_NAME: Name of the job that failed
+# - LOCK_ERROR: The specific lock error detected  
+# - UNLOCK_OPERATION: Set to "true" to identify unlock operations
         echo "Unlocking repository for failed job: $FAILED_JOB_NAME"
         echo "Lock error was: $LOCK_ERROR"
         

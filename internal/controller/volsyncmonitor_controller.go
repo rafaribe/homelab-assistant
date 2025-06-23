@@ -307,7 +307,10 @@ func (r *VolSyncMonitorReconciler) createUnlockJob(ctx context.Context, monitor 
 	// Generate unique name for unlock job
 	unlockJobName := fmt.Sprintf("volsync-unlock-%s-%d", failedJob.Name, time.Now().Unix())
 
-	// Build job spec from template
+	// Log what we're inheriting from the failed job
+	r.logInheritedConfiguration(ctx, failedJob)
+
+	// Build job spec from template with inherited configuration
 	jobSpec := r.buildUnlockJobSpec(monitor, failedJob, unlockJobName, lockError)
 
 	unlockJob := &batchv1.Job{
@@ -354,25 +357,30 @@ func (r *VolSyncMonitorReconciler) buildUnlockJobSpec(monitor *volsyncv1alpha1.V
 		template.Args = []string{"-c", "restic unlock"}
 	}
 
+	// Extract configuration from the failed job
+	failedContainer := r.extractPrimaryContainer(failedJob)
+	
 	// Build container spec
 	container := corev1.Container{
 		Name:    "unlock",
 		Image:   template.Image,
 		Command: template.Command,
 		Args:    template.Args,
-		Env: []corev1.EnvVar{
-			{
-				Name:  "FAILED_JOB_NAME",
-				Value: failedJob.Name,
-			},
-			{
-				Name:  "LOCK_ERROR",
-				Value: lockError,
-			},
-		},
 	}
 
-	// Add resource requirements if specified
+	// Inherit environment variables from failed job
+	container.Env = r.buildEnvironmentVariables(failedContainer, failedJob, lockError)
+	
+	// Inherit EnvFrom sources from failed job
+	if failedContainer != nil && len(failedContainer.EnvFrom) > 0 {
+		container.EnvFrom = make([]corev1.EnvFromSource, len(failedContainer.EnvFrom))
+		copy(container.EnvFrom, failedContainer.EnvFrom)
+	}
+	
+	// Inherit volume mounts from failed job
+	container.VolumeMounts = r.extractVolumeMounts(failedContainer)
+
+	// Add resource requirements if specified in template
 	if template.Resources != nil {
 		container.Resources = corev1.ResourceRequirements{}
 		if template.Resources.Limits != nil {
@@ -389,24 +397,42 @@ func (r *VolSyncMonitorReconciler) buildUnlockJobSpec(monitor *volsyncv1alpha1.V
 		}
 	}
 
-	// Build pod spec
+	// Build pod spec with inherited volumes
 	podSpec := corev1.PodSpec{
 		RestartPolicy: corev1.RestartPolicyNever,
 		Containers:    []corev1.Container{container},
+		Volumes:       r.extractVolumes(failedJob),
 	}
 
-	// Add service account if specified
+	// Add service account if specified in template, otherwise inherit from failed job
 	if template.ServiceAccount != "" {
 		podSpec.ServiceAccountName = template.ServiceAccount
+	} else {
+		podSpec.ServiceAccountName = failedJob.Spec.Template.Spec.ServiceAccountName
 	}
 
-	// Add security context if specified
+	// Add security context if specified in template, otherwise inherit from failed job
 	if template.SecurityContext != nil {
 		podSpec.SecurityContext = &corev1.PodSecurityContext{
 			RunAsUser:  template.SecurityContext.RunAsUser,
 			RunAsGroup: template.SecurityContext.RunAsGroup,
 			FSGroup:    template.SecurityContext.FSGroup,
 		}
+	} else if failedJob.Spec.Template.Spec.SecurityContext != nil {
+		podSpec.SecurityContext = failedJob.Spec.Template.Spec.SecurityContext.DeepCopy()
+	}
+
+	// Inherit other pod-level configurations
+	if len(failedJob.Spec.Template.Spec.ImagePullSecrets) > 0 {
+		podSpec.ImagePullSecrets = failedJob.Spec.Template.Spec.ImagePullSecrets
+	}
+	
+	if failedJob.Spec.Template.Spec.NodeSelector != nil {
+		podSpec.NodeSelector = failedJob.Spec.Template.Spec.NodeSelector
+	}
+
+	if len(failedJob.Spec.Template.Spec.Tolerations) > 0 {
+		podSpec.Tolerations = failedJob.Spec.Template.Spec.Tolerations
 	}
 
 	// Build job spec
@@ -430,6 +456,150 @@ func (r *VolSyncMonitorReconciler) buildUnlockJobSpec(monitor *volsyncv1alpha1.V
 	}
 
 	return jobSpec
+}
+
+// extractPrimaryContainer finds the main container from the failed job
+// Prioritizes containers with volsync-related names or the first container
+func (r *VolSyncMonitorReconciler) extractPrimaryContainer(failedJob batchv1.Job) *corev1.Container {
+	containers := failedJob.Spec.Template.Spec.Containers
+	if len(containers) == 0 {
+		return nil
+	}
+
+	// Look for volsync-related containers first
+	for _, container := range containers {
+		if strings.Contains(strings.ToLower(container.Name), "volsync") ||
+		   strings.Contains(strings.ToLower(container.Name), "restic") ||
+		   strings.Contains(strings.ToLower(container.Name), "backup") {
+			return &container
+		}
+	}
+
+	// Fall back to the first container
+	return &containers[0]
+}
+
+// buildEnvironmentVariables combines environment variables from the failed job with unlock-specific vars
+func (r *VolSyncMonitorReconciler) buildEnvironmentVariables(failedContainer *corev1.Container, failedJob batchv1.Job, lockError string) []corev1.EnvVar {
+	envVars := []corev1.EnvVar{
+		{
+			Name:  "FAILED_JOB_NAME",
+			Value: failedJob.Name,
+		},
+		{
+			Name:  "LOCK_ERROR",
+			Value: lockError,
+		},
+		{
+			Name:  "UNLOCK_OPERATION",
+			Value: "true",
+		},
+	}
+
+	// Add all environment variables from the failed container
+	if failedContainer != nil {
+		for _, env := range failedContainer.Env {
+			// Skip if we already have this env var (our unlock-specific vars take precedence)
+			exists := false
+			for _, existing := range envVars {
+				if existing.Name == env.Name {
+					exists = true
+					break
+				}
+			}
+			if !exists {
+				envVars = append(envVars, env)
+			}
+		}
+	}
+
+	return envVars
+}
+
+// extractVolumeMounts gets all volume mounts from the failed container
+func (r *VolSyncMonitorReconciler) extractVolumeMounts(failedContainer *corev1.Container) []corev1.VolumeMount {
+	if failedContainer == nil {
+		return []corev1.VolumeMount{}
+	}
+
+	// Return a deep copy of volume mounts to avoid modifying the original
+	volumeMounts := make([]corev1.VolumeMount, len(failedContainer.VolumeMounts))
+	for i, vm := range failedContainer.VolumeMounts {
+		volumeMounts[i] = corev1.VolumeMount{
+			Name:             vm.Name,
+			MountPath:        vm.MountPath,
+			SubPath:          vm.SubPath,
+			ReadOnly:         vm.ReadOnly,
+			MountPropagation: vm.MountPropagation,
+		}
+	}
+
+	return volumeMounts
+}
+
+// extractVolumes gets all volumes from the failed job's pod spec
+func (r *VolSyncMonitorReconciler) extractVolumes(failedJob batchv1.Job) []corev1.Volume {
+	volumes := failedJob.Spec.Template.Spec.Volumes
+	if len(volumes) == 0 {
+		return []corev1.Volume{}
+	}
+
+	// Return a deep copy of volumes to avoid modifying the original
+	extractedVolumes := make([]corev1.Volume, len(volumes))
+	for i, vol := range volumes {
+		extractedVolumes[i] = *vol.DeepCopy()
+	}
+
+	return extractedVolumes
+}
+
+// logInheritedConfiguration logs what configuration is being inherited from the failed job
+func (r *VolSyncMonitorReconciler) logInheritedConfiguration(ctx context.Context, failedJob batchv1.Job) {
+	logger := log.FromContext(ctx)
+	
+	primaryContainer := r.extractPrimaryContainer(failedJob)
+	if primaryContainer == nil {
+		logger.Info("No containers found in failed job", "job", failedJob.Name)
+		return
+	}
+
+	logger.Info("Inheriting configuration from failed job",
+		"job", failedJob.Name,
+		"namespace", failedJob.Namespace,
+		"primaryContainer", primaryContainer.Name,
+		"image", primaryContainer.Image,
+		"envVarCount", len(primaryContainer.Env),
+		"volumeMountCount", len(primaryContainer.VolumeMounts),
+		"volumeCount", len(failedJob.Spec.Template.Spec.Volumes),
+		"serviceAccount", failedJob.Spec.Template.Spec.ServiceAccountName,
+	)
+
+	// Log environment variables (names only for security)
+	if len(primaryContainer.Env) > 0 {
+		envNames := make([]string, len(primaryContainer.Env))
+		for i, env := range primaryContainer.Env {
+			envNames[i] = env.Name
+		}
+		logger.Info("Inheriting environment variables", "envVars", envNames)
+	}
+
+	// Log volume mounts
+	if len(primaryContainer.VolumeMounts) > 0 {
+		mountPaths := make([]string, len(primaryContainer.VolumeMounts))
+		for i, vm := range primaryContainer.VolumeMounts {
+			mountPaths[i] = fmt.Sprintf("%s->%s", vm.Name, vm.MountPath)
+		}
+		logger.Info("Inheriting volume mounts", "mounts", mountPaths)
+	}
+
+	// Log volumes
+	if len(failedJob.Spec.Template.Spec.Volumes) > 0 {
+		volumeNames := make([]string, len(failedJob.Spec.Template.Spec.Volumes))
+		for i, vol := range failedJob.Spec.Template.Spec.Volumes {
+			volumeNames[i] = vol.Name
+		}
+		logger.Info("Inheriting volumes", "volumes", volumeNames)
+	}
 }
 
 func (r *VolSyncMonitorReconciler) removeFailedJob(ctx context.Context, job batchv1.Job) error {

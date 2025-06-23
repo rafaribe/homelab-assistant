@@ -10,18 +10,22 @@ spec:
   # Remove failed jobs after creating unlock jobs
   removeFailedJobs: true
   
-  # Simple unlock job template
+  # Simple unlock job template - most config is inherited from failed jobs
   unlockJobTemplate:
+    # Only the image is required - everything else is inherited automatically
     image: "restic/restic:latest"
+    
+    # Optionally customize the unlock command (defaults to "restic unlock")
     command: ["/bin/sh"]
     args: 
       - "-c"
       - |
         echo "Unlocking repository for failed job: $FAILED_JOB_NAME"
-        restic unlock
+        echo "Lock error detected: $LOCK_ERROR"
+        restic unlock --remove-all
         echo "Repository unlocked successfully"
     
-    # Basic resource limits
+    # Optional: Set resource limits (not inherited from failed jobs)
     resources:
       requests:
         memory: "64Mi"
@@ -32,3 +36,12 @@ spec:
   
   # Cleanup unlock jobs after 1 hour
   ttlSecondsAfterFinished: 3600
+
+---
+# The unlock job will automatically inherit from the failed job:
+# - All environment variables (RESTIC_REPOSITORY, RESTIC_PASSWORD, etc.)
+# - All volume mounts (for accessing backup data and credentials)
+# - All volumes (PVCs, secrets, configmaps)
+# - Service account and security context
+# - Node selector and tolerations
+# - Image pull secrets

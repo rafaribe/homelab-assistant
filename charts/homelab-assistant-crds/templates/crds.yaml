@@ -105,21 +105,28 @@ spec:
                 description: UnlockJobTemplate defines the template for unlock jobs
                 properties:
                   args:
-                    description: Args are the arguments to pass to the command
+                    description: |-
+                      Args are the arguments to pass to the command
+                      Defaults to ["-c", "restic unlock"] if not specified
                     items:
                       type: string
                     type: array
                   command:
-                    description: Command is the command to run in the unlock job
+                    description: |-
+                      Command is the command to run in the unlock job
+                      Defaults to ["/bin/sh"] if not specified
                     items:
                       type: string
                     type: array
                   image:
-                    description: Image is the container image to use for unlock jobs
+                    description: |-
+                      Image is the container image to use for unlock jobs
+                      This should typically be the same image as used in your VolSync jobs
                     type: string
                   resources:
-                    description: Resources defines resource requirements for unlock
-                      jobs
+                    description: |-
+                      Resources defines resource requirements for unlock jobs
+                      If not specified, no resource limits are set (inherited config doesn't include resources)
                     properties:
                       limits:
                         additionalProperties:
@@ -135,7 +142,9 @@ spec:
                         type: object
                     type: object
                   securityContext:
-                    description: SecurityContext for unlock jobs
+                    description: |-
+                      SecurityContext for unlock jobs
+                      If not specified, inherits the security context from the failed job
                     properties:
                       fsGroup:
                         description: FSGroup defines a file system group ID for all
@@ -154,7 +163,9 @@ spec:
                         type: integer
                     type: object
                   serviceAccount:
-                    description: ServiceAccount to use for unlock jobs
+                    description: |-
+                      ServiceAccount to use for unlock jobs
+                      If not specified, inherits the service account from the failed job
                     type: string
                 required:
                 - image
