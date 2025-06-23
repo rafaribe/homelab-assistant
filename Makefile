@@ -65,6 +65,11 @@ OPERATOR_SDK_VERSION ?= v1.34.1
 
 # Image URL to use all building/pushing image targets
 IMG ?= controller:latest
+
+# OCI Registry configuration for Helm charts
+CHART_REGISTRY ?= ghcr.io/rafaribe/charts
+CHART_VERSION ?= $(VERSION)
+
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.28.3
 
@@ -111,6 +116,15 @@ help: ## Display this help.
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+
+.PHONY: update-crds
+update-crds: manifests ## Generate CRDs and update Helm chart templates
+	@echo "Updating CRDs in Helm chart..."
+	@echo "{{- if .Values.installCRDs }}" > charts/homelab-assistant-crds/templates/crds.yaml
+	@echo "---" >> charts/homelab-assistant-crds/templates/crds.yaml
+	@cat config/crd/bases/*.yaml >> charts/homelab-assistant-crds/templates/crds.yaml
+	@echo "{{- end }}" >> charts/homelab-assistant-crds/templates/crds.yaml
+	@echo "CRDs updated in Helm chart templates"
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
@@ -246,7 +260,9 @@ chart-docs: ## Generate chart documentation
 chart-package: ## Package helm charts
 	@echo "Packaging charts..."
 	@mkdir -p dist
-	@helm package charts/homelab-assistant --destination dist/
+	@if [ -d "charts/homelab-assistant" ]; then \
+		helm package charts/homelab-assistant --destination dist/; \
+	fi
 	@helm package charts/homelab-assistant-crds --destination dist/
 
 .PHONY: chart-install-local
@@ -280,6 +296,18 @@ chart-uninstall-local: ## Uninstall local charts (WARNING: Uses current kubeconf
 	@helm uninstall homelab-assistant -n homelab-assistant-system || true
 	@echo "Uninstalling CRDs..."
 	@helm uninstall homelab-assistant-crds -n homelab-assistant-system || true
+
+.PHONY: chart-push-oci
+chart-push-oci: update-crds chart-package ## Push CRDs chart to OCI registry
+	@echo "Pushing homelab-assistant-crds chart to OCI registry..."
+	@helm push dist/homelab-assistant-crds-*.tgz oci://$(CHART_REGISTRY)
+	@echo "Chart pushed successfully to oci://$(CHART_REGISTRY)/homelab-assistant-crds:$(CHART_VERSION)"
+
+.PHONY: chart-remove-main
+chart-remove-main: ## Remove the main homelab-assistant chart (keeping only CRDs)
+	@echo "Removing main homelab-assistant chart..."
+	@rm -rf charts/homelab-assistant
+	@echo "Main chart removed. Only CRDs chart remains."
 
 ##@ Build Dependencies
 

@@ -227,6 +227,47 @@ run = [
     "echo '✅ Coverage report generated: coverage.html'",
 ]
 
+[tasks.update-crds]
+description = "Generate CRDs and update Helm chart templates"
+depends = ["manifests"]
+run = [
+    "echo '🔄 Updating CRDs in Helm chart...'",
+    "echo '{{- if .Values.installCRDs }}' > charts/homelab-assistant-crds/templates/crds.yaml",
+    "echo '---' >> charts/homelab-assistant-crds/templates/crds.yaml",
+    "cat config/crd/bases/*.yaml >> charts/homelab-assistant-crds/templates/crds.yaml",
+    "echo '{{- end }}' >> charts/homelab-assistant-crds/templates/crds.yaml",
+    "echo '✅ CRDs updated in Helm chart templates'",
+]
+
+[tasks.chart-package]
+description = "Package Helm charts"
+depends = ["update-crds"]
+run = [
+    "echo '📦 Packaging charts...'",
+    "mkdir -p dist",
+    "if [ -d 'charts/homelab-assistant' ]; then helm package charts/homelab-assistant --destination dist/; fi",
+    "helm package charts/homelab-assistant-crds --destination dist/",
+    "echo '✅ Charts packaged successfully'",
+]
+
+[tasks.chart-push-oci]
+description = "Push CRDs chart to OCI registry"
+depends = ["chart-package"]
+env = { CHART_REGISTRY = "ghcr.io/rafaribe/charts" }
+run = [
+    "echo '🚀 Pushing homelab-assistant-crds chart to OCI registry...'",
+    "helm push dist/homelab-assistant-crds-*.tgz oci://${CHART_REGISTRY}",
+    "echo '✅ Chart pushed successfully to oci://${CHART_REGISTRY}/homelab-assistant-crds'",
+]
+
+[tasks.chart-remove-main]
+description = "Remove the main homelab-assistant chart (keeping only CRDs)"
+run = [
+    "echo '🗑️  Removing main homelab-assistant chart...'",
+    "rm -rf charts/homelab-assistant",
+    "echo '✅ Main chart removed. Only CRDs chart remains.'",
+]
+
 [tasks.coverage-ci]
 description = "Generate coverage report for CI (unit tests only)"
 run = [
