@@ -248,11 +248,21 @@ func (r *VolSyncMonitorReconciler) matchesJobSelector(job batchv1.Job, selector 
 }
 
 func (r *VolSyncMonitorReconciler) isJobFailed(job batchv1.Job) bool {
+	// Check if job has completely failed (exhausted retries)
 	for _, condition := range job.Status.Conditions {
 		if condition.Type == batchv1.JobFailed && condition.Status == corev1.ConditionTrue {
 			return true
 		}
 	}
+	
+	// Also check if job is actively failing (has failed attempts but still retrying)
+	// This catches jobs that are stuck in retry loops due to lock errors
+	if job.Status.Failed > 0 {
+		// Consider a job as "failing" if it has failed at least 2 times
+		// This allows for transient failures but catches persistent issues
+		return job.Status.Failed >= 2
+	}
+	
 	return false
 }
 
