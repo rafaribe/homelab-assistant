@@ -16,7 +16,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -361,10 +360,17 @@ func (r *VolSyncMonitorReconciler) createUnlockJob(ctx context.Context, monitor 
 		Spec: *jobSpec,
 	}
 
-	// Set owner reference to the monitor
-	if err := controllerutil.SetControllerReference(monitor, unlockJob, r.Scheme); err != nil {
-		return nil, fmt.Errorf("failed to set controller reference: %w", err)
+	// Don't set owner reference for cross-namespace resources
+	// The VolSyncMonitor in 'system' namespace can't own jobs in other namespaces
+	// Instead, we'll track these jobs via labels and status
+
+	// Add labels to identify this as a VolSync unlock job
+	if unlockJob.Labels == nil {
+		unlockJob.Labels = make(map[string]string)
 	}
+	unlockJob.Labels["app.kubernetes.io/managed-by"] = "homelab-assistant"
+	unlockJob.Labels["homelab.rafaribe.com/volsync-unlock"] = "true"
+	unlockJob.Labels["homelab.rafaribe.com/failed-job"] = failedJob.Name
 
 	// Create the job
 	if err := r.Create(ctx, unlockJob); err != nil {
