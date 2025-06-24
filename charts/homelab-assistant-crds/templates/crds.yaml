@@ -96,6 +96,10 @@ spec:
                 description: RemoveFailedJobs controls whether to remove failed VolSync
                   jobs after creating unlock jobs
                 type: boolean
+              scanInterval:
+                description: 'ScanInterval defines how often to scan for failed jobs
+                  (default: 30s)'
+                type: string
               ttlSecondsAfterFinished:
                 description: TTLSecondsAfterFinished specifies the TTL for unlock
                   jobs

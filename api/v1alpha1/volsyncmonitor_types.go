@@ -50,6 +50,10 @@ type VolSyncMonitorSpec struct {
 	// If not specified, monitors all jobs with "volsync-" prefix
 	// +optional
 	JobSelector *JobSelector `json:"jobSelector,omitempty"`
+
+	// ScanInterval defines how often to scan for failed jobs (default: 30s)
+	// +optional
+	ScanInterval *metav1.Duration `json:"scanInterval,omitempty"`
 }
 
 // JobSelector defines how to select jobs to monitor

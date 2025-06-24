@@ -6,10 +6,13 @@ metadata:
 spec:
   # Enable the monitor
   enabled: true
-  
+
+  # Scan for failed jobs every 30 seconds (default)
+  scanInterval: 30s
+
   # Remove failed jobs after creating unlock jobs
   removeFailedJobs: true
-  
+
   # Simple unlock job template - most config is inherited from failed jobs
   unlockJobTemplate:
     # Only the image is required - everything else is inherited automatically
@@ -38,6 +41,13 @@ spec:
   ttlSecondsAfterFinished: 3600
 
 ---
+# The monitor now runs PERIODICALLY every 30 seconds to:
+# 1. Scan ALL namespaces for failed VolSync jobs
+# 2. Check job logs for lock error patterns  
+# 3. Create unlock jobs with inherited configuration
+# 4. Remove failed jobs (if configured)
+# 5. Track and report statistics
+#
 # The unlock job will automatically inherit from the failed job:
 # - All environment variables (RESTIC_REPOSITORY, RESTIC_PASSWORD, etc.)
 # - All volume mounts (for accessing backup data and credentials)

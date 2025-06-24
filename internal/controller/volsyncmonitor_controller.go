@@ -65,7 +65,9 @@ func (r *VolSyncMonitorReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		monitor.Status.Phase = volsyncv1alpha1.VolSyncMonitorPhaseActive
 	}
 
-	// Main reconciliation logic
+	logger.Info("Starting periodic VolSync job monitoring", "monitor", monitor.Name)
+
+	// Main reconciliation logic - this now runs periodically
 	result, err := r.reconcileMonitor(ctx, &monitor)
 	if err != nil {
 		monitor.Status.Phase = volsyncv1alpha1.VolSyncMonitorPhaseError
@@ -90,17 +92,24 @@ func (r *VolSyncMonitorReconciler) reconcileMonitor(ctx context.Context, monitor
 	logger := log.FromContext(ctx)
 
 	// Step 1: Find failed VolSync jobs
+	logger.Info("Scanning for failed VolSync jobs", "monitor", monitor.Name)
 	failedJobs, err := r.findFailedVolSyncJobs(ctx, monitor)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to find failed VolSync jobs: %w", err)
 	}
 
+	logger.Info("Found failed VolSync jobs", "count", len(failedJobs))
+
 	// Step 2: Process each failed job
+	processedCount := 0
 	for _, job := range failedJobs {
 		// Skip if already processed
 		if r.isJobAlreadyProcessed(monitor, job) {
+			logger.Info("Job already processed, skipping", "job", job.Name, "namespace", job.Namespace)
 			continue
 		}
+
+		logger.Info("Checking job for lock errors", "job", job.Name, "namespace", job.Namespace, "status", job.Status.Conditions)
 
 		// Check if job has lock errors
 		hasLockError, lockError, err := r.checkJobForLockErrors(ctx, job, monitor.Spec.LockErrorPatterns)
@@ -145,8 +154,11 @@ func (r *VolSyncMonitorReconciler) reconcileMonitor(ctx context.Context, monitor
 			monitor.Status.TotalLockErrorsDetected++
 			monitor.Status.TotalUnlocksCreated++
 			monitor.Status.LastUnlockTime = &metav1.Time{Time: time.Now()}
+			processedCount++
 		}
 	}
+
+	logger.Info("Completed VolSync job scan", "failedJobs", len(failedJobs), "processedJobs", processedCount)
 
 	// Step 3: Update active unlocks status
 	if err := r.updateActiveUnlocks(ctx, monitor); err != nil {
@@ -156,8 +168,15 @@ func (r *VolSyncMonitorReconciler) reconcileMonitor(ctx context.Context, monitor
 	// Step 4: Clean up old processed jobs (keep last 50)
 	r.cleanupProcessedJobs(monitor)
 
-	// Requeue after 30 seconds to continuously monitor
-	return ctrl.Result{RequeueAfter: time.Second * 30}, nil
+	// Determine scan interval (default 30 seconds)
+	scanInterval := time.Second * 30
+	if monitor.Spec.ScanInterval != nil {
+		scanInterval = monitor.Spec.ScanInterval.Duration
+	}
+
+	// Requeue after scan interval to continuously monitor
+	logger.Info("Requeuing for next scan", "interval", scanInterval)
+	return ctrl.Result{RequeueAfter: scanInterval}, nil
 }
 
 func (r *VolSyncMonitorReconciler) findFailedVolSyncJobs(ctx context.Context, monitor *volsyncv1alpha1.VolSyncMonitor) ([]batchv1.Job, error) {
