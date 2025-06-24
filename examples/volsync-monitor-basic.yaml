@@ -7,8 +7,18 @@ spec:
   # Enable the monitor
   enabled: true
 
-  # Scan for failed jobs every 30 seconds (default)
+  # Scan for failed jobs every 30 seconds (configurable)
   scanInterval: 30s
+
+  # Monitor ALL namespaces for VolSync jobs (default behavior)
+  jobSelector:
+    namePrefix: "volsync-"
+    # namespaces: []  # Empty = ALL namespaces
+    # To monitor specific namespaces only, uncomment and specify:
+    # namespaces:
+    #   - media
+    #   - downloads
+    #   - services
 
   # Remove failed jobs after creating unlock jobs
   removeFailedJobs: true
@@ -41,14 +51,20 @@ spec:
   ttlSecondsAfterFinished: 3600
 
 ---
-# The monitor now runs PERIODICALLY every 30 seconds to:
-# 1. Scan ALL namespaces for failed VolSync jobs
+# MONITORING SCOPE:
+# By default (no namespaces specified), the monitor scans ALL namespaces
+# for failed VolSync jobs. This is the recommended configuration for
+# comprehensive monitoring across your entire cluster.
+#
+# The monitor runs PERIODICALLY every 30 seconds to:
+# 1. Scan ALL namespaces for failed VolSync jobs (name starts with "volsync-")
 # 2. Check job logs for lock error patterns  
 # 3. Create unlock jobs with inherited configuration
 # 4. Remove failed jobs (if configured)
 # 5. Track and report statistics
 #
-# The unlock job will automatically inherit from the failed job:
+# INHERITED CONFIGURATION:
+# The unlock job automatically inherits from the failed job:
 # - All environment variables (RESTIC_REPOSITORY, RESTIC_PASSWORD, etc.)
 # - All volume mounts (for accessing backup data and credentials)
 # - All volumes (PVCs, secrets, configmaps)

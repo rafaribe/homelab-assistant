@@ -14,12 +14,23 @@ spec:
   jobSelector:
     # Monitor jobs with "volsync-" prefix (default)
     namePrefix: "volsync-"
-    # Optional: monitor specific namespaces only
+    
+    # NAMESPACE MONITORING OPTIONS:
+    
+    # Option 1: Monitor ALL namespaces (recommended - default behavior)
+    # Don't specify namespaces field, or leave it empty
+    # namespaces: []
+    
+    # Option 2: Monitor specific namespaces only
+    # Uncomment and specify the namespaces you want to monitor:
     # namespaces:
-    #   - default
     #   - media
+    #   - downloads
+    #   - services
     #   - home-automation
-    # Optional: additional label selector
+    #   - observability
+    
+    # Optional: additional label selector for more precise job filtering
     # labelSelector:
     #   app.kubernetes.io/name: volsync
   

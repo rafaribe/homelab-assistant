@@ -83,12 +83,42 @@ spec:
   enabled: true
   maxConcurrentUnlocks: 3
   ttlSecondsAfterFinished: 3600
+  
+  # Monitor ALL namespaces by default (recommended)
+  jobSelector:
+    namePrefix: "volsync-"
+    # namespaces: []  # Empty = ALL namespaces
+  
   unlockJobTemplate:
     # Only the image is required - everything else is inherited from the failed job
     image: "quay.io/backube/volsync:0.13.0-rc.2"
     # Optionally override the default unlock command
     command: ["restic"]
     args: ["unlock", "--remove-all"]
+```
+
+## Namespace Monitoring
+
+The VolSyncMonitor can monitor jobs across different namespace scopes:
+
+### Monitor ALL Namespaces (Recommended)
+```yaml
+spec:
+  jobSelector:
+    namePrefix: "volsync-"
+    # Don't specify namespaces field = monitors ALL namespaces
+```
+
+### Monitor Specific Namespaces Only
+```yaml
+spec:
+  jobSelector:
+    namePrefix: "volsync-"
+    namespaces:
+      - media
+      - downloads
+      - services
+      - home-automation
 ```
 
 ### Advanced Configuration
